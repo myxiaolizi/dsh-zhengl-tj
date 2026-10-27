@@ -27,7 +27,7 @@ import { fetchPrefs, fetchRange, rebuildStats, resetPref, resetProviderAlias, sa
 import { ChartTip } from './ChartTip.tsx'
 import { Donut, useDonutSize, type DonutSegment } from './Donut.tsx'
 import { estimateCost, formatCost, indexPrefs, indexProviderAliases, isPriced, modelLabel, normalizePrefsPayload, providerLabel, type CostEstimate, type CostLine } from './pricing.ts'
-import { formatTokens, formatCompact, formatPercent, cacheRate, cacheRateText, localDay, bucketAxisLabel, bucketTitle, providerOf, modelNameOf, smoothPath, niceTicks } from './format.ts'
+import { formatCompact, formatPercent, cacheRate, cacheRateText, localDay, bucketAxisLabel, bucketTitle, providerOf, modelNameOf, smoothPath, niceTicks } from './format.ts'
 import type { UsageStatsKey } from './locales.ts'
 import type { UsageStatsTranslator } from './index.tsx'
 import { statsLineState } from './stats-line-state.ts'
@@ -828,12 +828,12 @@ function DailyTrend({ models, daily, granularity, t, colorForModel, panelRef, la
         {tip && (
           <ChartTip anchor={tip.anchor} panelRef={panelRef}>
             <div className={css.tipTitle}>{bucketTitle(tip.day, granularity)}</div>
-            <div>{t('total')}: {formatTokens(tipTotal(tip))}</div>
+            <div>{t('total')}: {formatCompact(tipTotal(tip))}</div>
             {legendModels.filter((m) => tip.byModel[m] !== undefined && !hidden.has(m)).map((m) => (
-              <div key={m} className={css.tipRow}><i className={css.legendSwatch} style={{ background: colorForModel(m) }} />{m === OTHER_MODEL ? t('other') : labelForModel(m)}: {formatTokens(tip.byModel[m]!)}</div>
+              <div key={m} className={css.tipRow}><i className={css.legendSwatch} style={{ background: colorForModel(m) }} />{m === OTHER_MODEL ? t('other') : labelForModel(m)}: {formatCompact(tip.byModel[m]!)}</div>
             ))}
             {tip.otherByModel && Object.entries(tip.otherByModel).sort((a, b) => b[1] - a[1]).map(([m, v]) => (
-              <div key={m} className={clsx(css.tipRow, css.tipRowOther)}><i className={css.legendSwatch} style={{ background: OTHER_COLOR }} />{m}: {formatTokens(v)}</div>
+              <div key={m} className={clsx(css.tipRow, css.tipRowOther)}><i className={css.legendSwatch} style={{ background: OTHER_COLOR }} />{m}: {formatCompact(v)}</div>
             ))}
             <div>{t('cacheHitRate')}: {cacheRateText(tip.cacheHit, tip.cacheMiss)}</div>
           </ChartTip>
@@ -914,7 +914,7 @@ function ModelUsage({ models, t, colorForModel, panelRef, labelForModel, estimat
     key: m.model,
     tokens: m.tokens,
     color: colorForModel(m.model),
-    label: `${m.model === OTHER_MODEL ? t('other') : labelForModel(m.model)}: ${formatTokens(m.tokens)} (${formatPercent(m.percent)})`,
+    label: `${m.model === OTHER_MODEL ? t('other') : labelForModel(m.model)}: ${formatCompact(m.tokens)} (${formatPercent(m.percent)})`,
   }))
   const total = models.reduce((sum, m) => sum + m.tokens, 0)
 
@@ -945,7 +945,7 @@ function ModelUsage({ models, t, colorForModel, panelRef, labelForModel, estimat
           {tip && (
             <ChartTip anchor={tip.anchor} panelRef={panelRef}>
               <div className={css.tipTitle}>{tip.model === OTHER_MODEL ? t('other') : labelForModel(tip.model)}</div>
-              <div>{t('total')}: {formatTokens(tip.tokens)}</div>
+              <div>{t('total')}: {formatCompact(tip.tokens)}</div>
               <div>{t('percent')}: {formatPercent(tip.percent)}</div>
               {tip.model !== OTHER_MODEL && hasAnyPrice && (
                 <div>{t('estimatedCost')}: {costByModel.has(tip.model) && !costByModel.get(tip.model)!.unpriced
@@ -957,7 +957,7 @@ function ModelUsage({ models, t, colorForModel, panelRef, labelForModel, estimat
                   {tip.items.map((it) => (
                     <div key={it.model} className={clsx(css.tipRow, css.tipRowOther)}>
                       <i className={css.legendSwatch} style={{ background: OTHER_COLOR }} />
-                      {labelForModel(it.model)}: {formatTokens(it.tokens)}
+                      {labelForModel(it.model)}: {formatCompact(it.tokens)}
                       {hasAnyPrice && costByModel.has(it.model) && !costByModel.get(it.model)!.unpriced
                         ? ` · ${formatCost(costByModel.get(it.model)!.cost, currency)}`
                         : ''}
@@ -1007,7 +1007,7 @@ function ModelUsage({ models, t, colorForModel, panelRef, labelForModel, estimat
                   {!isOther && <span className={css.modelProvider}>{providerOf(m.model)}</span>}
                 </div>
                 <div className={css.modelValues}>
-                  <span className={css.modelTokens}>{formatTokens(m.tokens)}</span>
+                  <span className={css.modelTokens}>{formatCompact(m.tokens)}</span>
                   <span className={css.modelPct}>{formatPercent(m.percent)}</span>
                   {hasAnyPrice && !isOther && (
                     <span className={css.modelCost}>
@@ -1031,7 +1031,7 @@ function ModelUsage({ models, t, colorForModel, panelRef, labelForModel, estimat
                       <span className={css.modelProvider}>{providerOf(it.model)}</span>
                     </div>
                     <div className={css.modelValues}>
-                      <span className={css.modelTokens}>{formatTokens(it.tokens)}</span>
+                      <span className={css.modelTokens}>{formatCompact(it.tokens)}</span>
                       <span className={css.modelPct}>{formatPercent(it.percent)}</span>
                       {hasAnyPrice && (
                         <span className={css.modelCost}>
@@ -1084,7 +1084,7 @@ function ProviderUsage({ providers, t, colorForProvider, panelRef, labelForModel
     key: p.provider,
     tokens: p.tokens,
     color: colorForProvider(p.provider),
-    label: `${labelForProvider(p.provider)}: ${formatTokens(p.tokens)} (${formatPercent(p.percent)})`,
+    label: `${labelForProvider(p.provider)}: ${formatCompact(p.tokens)} (${formatPercent(p.percent)})`,
   }))
   const total = providers.reduce((sum, p) => sum + p.tokens, 0)
 
@@ -1113,14 +1113,14 @@ function ProviderUsage({ providers, t, colorForProvider, panelRef, labelForModel
           {tip && (
             <ChartTip anchor={tip.anchor} panelRef={panelRef}>
               <div className={css.tipTitle}>{labelForProvider(tip.provider)}</div>
-              <div>{t('total')}: {formatTokens(tip.tokens)}</div>
+              <div>{t('total')}: {formatCompact(tip.tokens)}</div>
               <div>{t('percent')}: {formatPercent(tip.percent)}</div>
               {tip.models.length > 0 && (
                 <div className={css.tipBreakdown}>
                   {tip.models.map((m) => (
                     <div key={m.model} className={clsx(css.tipRow, css.tipRowOther)}>
                       <i className={css.legendSwatch} style={{ background: OTHER_PROVIDER_COLOR }} />
-                      {labelForModel(m.model)}: {formatTokens(m.tokens)}
+                      {labelForModel(m.model)}: {formatCompact(m.tokens)}
                     </div>
                   ))}
                 </div>
@@ -1165,7 +1165,7 @@ function ProviderUsage({ providers, t, colorForProvider, panelRef, labelForModel
                     {!isOther && <span className={css.modelProvider}>{t('providerModels', { n: p.models.length })}</span>}
                   </div>
                   <div className={css.modelValues}>
-                    <span className={css.modelTokens}>{formatTokens(p.tokens)}</span>
+                    <span className={css.modelTokens}>{formatCompact(p.tokens)}</span>
                     <span className={css.modelPct}>{formatPercent(p.percent)}</span>
                   </div>
                 </li>
@@ -1204,7 +1204,7 @@ function ProviderUsage({ providers, t, colorForProvider, panelRef, labelForModel
                                     <span className={css.modelProvider}>{t('providerModels', { n: f.models.length })}</span>
                                   </div>
                                   <div className={css.modelValues}>
-                                    <span className={css.modelTokens}>{formatTokens(f.tokens)}</span>
+                                    <span className={css.modelTokens}>{formatCompact(f.tokens)}</span>
                                     <span className={css.modelPct}>{formatPercent(f.percent)}</span>
                                   </div>
                                 </li>
@@ -1218,7 +1218,7 @@ function ProviderUsage({ providers, t, colorForProvider, panelRef, labelForModel
                                             <span className={css.modelName}>{labelForModel(m.model)}</span>
                                           </div>
                                           <div className={css.modelValues}>
-                                            <span className={css.modelTokens}>{formatTokens(m.tokens)}</span>
+                                            <span className={css.modelTokens}>{formatCompact(m.tokens)}</span>
                                             <span className={css.modelPct}>{formatPercent(m.percent)}</span>
                                           </div>
                                         </li>
@@ -1239,7 +1239,7 @@ function ProviderUsage({ providers, t, colorForProvider, panelRef, labelForModel
                                 <span className={css.modelName}>{labelForModel(m.model)}</span>
                               </div>
                               <div className={css.modelValues}>
-                                <span className={css.modelTokens}>{formatTokens(m.tokens)}</span>
+                                <span className={css.modelTokens}>{formatCompact(m.tokens)}</span>
                                 <span className={css.modelPct}>{formatPercent(m.percent)}</span>
                               </div>
                             </li>

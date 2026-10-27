@@ -12,7 +12,7 @@ import clsx from 'clsx'
 import { Activity, CalendarDays, Coins, MessageSquare, MessagesSquare, Receipt, SlidersHorizontal } from 'lucide-react'
 import type { UsagePrefsPayload, UsageStatsRange } from '../wire.ts'
 import { formatCost, type CostEstimate } from './pricing.ts'
-import { formatCompact, formatTokens, cacheRateText } from './format.ts'
+import { formatCompact, cacheRateText } from './format.ts'
 import type { UsageStatsTranslator } from './index.tsx'
 import css from './UsageStatsPanel.module.css'
 
@@ -29,10 +29,10 @@ export function StatCards({ stats, t, estimate, prefs, pricedModels, onOpenEdito
   const cards: Array<{ icon: typeof Coins; label: string; value: string; sm?: boolean; wrap?: boolean; hint?: string; sub?: string; cost?: boolean }> = [
     // The headline is provider-inclusive (uncached input + output + cached
     // tokens) — the number a provider dashboard reports for the same calls.
-    // The headline is the compact K/W/M/B form (the number a provider dashboard
-    // shows); the exact, separator-formatted count stays underneath so the
-    // precise figure is still readable at a glance.
-    { icon: Coins, label: t('tokens'), value: formatCompact(stats.tokens), hint: t('tokensHint'), sub: `${formatTokens(stats.tokens)} ${t('tokensUnit')}` },
+    // Both readings are compact (K/W/M/B): the whole panel speaks one unit
+    // vocabulary, so a number never flips between "716,363,131" and "716.4M"
+    // depending on which surface the reader happens to be looking at.
+    { icon: Coins, label: t('tokens'), value: formatCompact(stats.tokens), hint: t('tokensHint'), sub: `${formatCompact(stats.tokens)} ${t('tokensUnit')}` },
     { icon: MessageSquare, label: t('sessions'), value: String(stats.turns) },
     { icon: MessagesSquare, label: t('requests'), value: String(stats.requests) },
     {

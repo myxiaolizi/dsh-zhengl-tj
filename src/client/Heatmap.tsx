@@ -40,7 +40,7 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import clsx from 'clsx'
 import type { DailyTokenUsage } from '../wire.ts'
-import { formatTokens, cacheRateText, bucketTitle } from './format.ts'
+import { formatCompact, cacheRateText, bucketTitle } from './format.ts'
 import { ChartTip } from './ChartTip.tsx'
 import type { UsageStatsTranslator } from './index.tsx'
 import css from './UsageStatsPanel.module.css'
@@ -277,7 +277,7 @@ export function HourlyHeatmap({ hourly, t, panelRef }: {
             {/* 小时键 `YYYY-MM-DDTHH` 拆成 `YYYY-MM-DD HH:00`；天键原样显示。
                 这段切分是纯字符串操作，不做日期运算。 */}
             <div className={css.tipTitle}>{bucketTitle(tip.key, tip.key.length > 10 ? 'hour' : 'day')}</div>
-            <div>{t('tokens')}: {formatTokens(tip.tokens)}</div>
+            <div>{t('tokens')}: {formatCompact(tip.tokens)}</div>
             <div>{t('requests')}: {tip.requests}</div>
             <div>{t('cacheHitRate')}: {cacheRateText(tip.cacheHit, tip.cacheMiss)}</div>
           </ChartTip>

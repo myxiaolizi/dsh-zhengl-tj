@@ -114,15 +114,14 @@ describe('UsageStatsSection', () => {
     }))
     render(<UsageStatsSection {...({ t } as UsageStatsSectionProps)} />)
     await act(async () => { await new Promise((r) => { setTimeout(r, 0) }) })
-    expect(screen.getByText('12,345 tokens')).toBeTruthy()
-    // The Tokens card leads with the compact form and repeats the exact count
-    // underneath, so both readings are available at once. 12,345 lands in the
-    // 万/W tier of formatCompact (>= 1e4), so it reads "1.2W" rather than the
-    // old K-tier "12.3K".
+    // Both the headline and the caption under it use the compact K/W/M/B form:
+    // 12,345 lands in the 万/W tier, so the card reads "1.2W" over
+    // "1.2W tokens". The panel never mixes "12,345" with "1.2W" on one screen.
     expect(screen.getByText('1.2W')).toBeTruthy()
+    expect(screen.getByText('1.2W tokens')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'rangePreset.7' }))
     await act(async () => { await new Promise((r) => { setTimeout(r, 0) }) })
-    expect(screen.getByText('12,345 tokens')).toBeTruthy()
+    expect(screen.getByText('1.2W tokens')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'refresh' }).hasAttribute('disabled')).toBe(true)
     vi.unstubAllGlobals()
   })

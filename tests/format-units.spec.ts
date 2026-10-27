@@ -42,7 +42,9 @@ describe('formatCompact — tier boundaries', () => {
     expect(formatCompact(1000000)).toBe('1M')
     expect(formatCompact(1234567)).toBe('1.2M')
     expect(formatCompact(1500000)).toBe('1.5M')
-    expect(formatCompact(999999999)).toBe('1000M')
+    // 999,999,999 rounds up to 1000M, which belongs to the B tier: escalation
+    // keeps the suffix honest instead of printing four digits under M.
+    expect(formatCompact(999999999)).toBe('1B')
   })
 
   it('uses B from 1e9 upward', () => {

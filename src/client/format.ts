@@ -22,7 +22,7 @@ export function formatTokens(n: number): string {
 /** Compact unit tiers for `formatCompact`, largest threshold first. The 1e4
  *  tier is the Chinese 万 (rendered as "W"), which keeps five-digit token
  *  counts short for a zh-CN audience: 15000 reads as "1.5W" instead of
- *  "15.0K". Tiers below 1e4 stay English-style (K), and values under 1e3 are
+ *  "15K". Tiers below 1e4 stay English-style (K), and values under 1e3 are
  *  emitted as plain integers. */
 const COMPACT_TIERS: ReadonlyArray<readonly [threshold: number, suffix: string]> = [
   [1e9, 'B'],
@@ -31,16 +31,22 @@ const COMPACT_TIERS: ReadonlyArray<readonly [threshold: number, suffix: string]>
   [1e3, 'K'],
 ]
 
-/** Compact units (B / M / 万=W / K) for axis labels and card sub-values.
+/**
+ * Compact units (B / M / 万=W / K) for every token count the panel shows.
  *
- *  One decimal place, with a meaningless trailing ".0" dropped, so 1000 →
- *  "1K", 15000 → "1.5W" and 1234567 → "1.2M". Tiers are chosen by magnitude,
- *  so negatives compact too (-15000 → "-1.5W"). Non-finite input degrades to
- *  a printable placeholder instead of leaking "NaNK" / "InfinityB" into the
- *  UI: NaN → "—", ±Infinity → "±∞".
+ * One decimal place, with a meaningless trailing ".0" dropped, so 1000 →
+ * "1K", 15000 → "1.5W" and 1234567 → "1.2M". Tiers are chosen by magnitude,
+ * so negatives compact too (-15000 → "-1.5W"). Non-finite input degrades to
+ * a printable placeholder instead of leaking "NaNK" / "InfinityB" into the
+ * UI: NaN → "—", ±Infinity → "±∞".
  *
- *  This is the LOSSY display form — use `formatTokens` when the reader needs
- *  the exact count. */
+ * A value that ROUNDS UP to 1000 within its own tier escalates to the next one
+ * (999_999_999 → "1B", not "1000M"): printing four digits plus a suffix is
+ * wider than the tier it claims to belong to, and it reads as a mistake next to
+ * the neighbouring "999.9M".
+ *
+ * This is the LOSSY display form — use `formatTokens` when the reader needs
+ * the exact count. */
 export function formatCompact(n: number): string {
   if (Number.isNaN(n)) return '—'
   if (!Number.isFinite(n)) return n > 0 ? '∞' : '-∞'
@@ -50,10 +56,20 @@ export function formatCompact(n: number): string {
   const rounded = Math.round(n)
   const sign = rounded < 0 ? '-' : ''
   const magnitude = Math.abs(rounded)
-  for (const [threshold, suffix] of COMPACT_TIERS) {
-    if (magnitude >= threshold) {
-      return sign + (magnitude / threshold).toFixed(1).replace(/\.0$/, '') + suffix
+
+  for (let i = 0; i < COMPACT_TIERS.length; i++) {
+    const [threshold, suffix] = COMPACT_TIERS[i]!
+    if (magnitude < threshold) continue
+    const scaled = Number((magnitude / threshold).toFixed(1))
+    // Escalation guard: 999.99M rounds to 1000M, which belongs to the B tier.
+    // Walk up one rung and re-scale; the top tier cannot escalate further, so
+    // it simply keeps its value.
+    if (scaled >= 1000 && i > 0) {
+      const [nextThreshold, nextSuffix] = COMPACT_TIERS[i - 1]!
+      const rescaled = Number((magnitude / nextThreshold).toFixed(1))
+      return sign + String(rescaled).replace(/\.0$/, '') + nextSuffix
     }
+    return sign + String(scaled).replace(/\.0$/, '') + suffix
   }
   return sign + String(magnitude)
 }
