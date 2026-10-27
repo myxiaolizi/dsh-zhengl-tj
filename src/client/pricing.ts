@@ -10,7 +10,7 @@
  * so a cost is `tokens / 1e6 * pricePerM`.
  */
 
-import type { ModelPreference, ModelTokenUsage, UsageModelOption, UsagePrefsPayload } from '../wire.ts'
+import type { ModelPreference, ModelTokenUsage, ProviderPreference, UsageModelOption, UsagePrefsPayload, UsageProviderOption } from '../wire.ts'
 
 /** The four billed buckets one model accumulated over a range. */
 export interface ModelBuckets {
@@ -30,6 +30,13 @@ export type PrefIndex = ReadonlyMap<string, ModelPreference>
  * different value) must degrade to "no aliases and no prices" rather than
  * crash the panel: the aggregate branch is the useful one and it must keep
  * rendering.
+ *
+ * Every field the panel reads is rebuilt here, INCLUDING the provider
+ * catalogue and provider aliases. Dropping them looked harmless (they are
+ * optional on the wire) but it silently disabled the whole provider-alias
+ * feature: the host sent the rows, this function discarded them, and every
+ * provider kept its raw id no matter what the reader typed. Optional on the
+ * wire still has to be carried through the normaliser.
  */
 export function normalizePrefsPayload(value: unknown): UsagePrefsPayload {
   const raw = (value ?? {}) as Partial<UsagePrefsPayload>
@@ -39,7 +46,19 @@ export function normalizePrefsPayload(value: unknown): UsagePrefsPayload {
   const options = Array.isArray(raw.options)
     ? raw.options.filter((o): o is UsageModelOption => typeof o === 'object' && o !== null && typeof o.model === 'string')
     : []
-  return { options, prefs, currency: typeof raw.currency === 'string' && raw.currency !== '' ? raw.currency : '$' }
+  const providerPrefs = Array.isArray(raw.providerPrefs)
+    ? raw.providerPrefs.filter((p): p is ProviderPreference => typeof p === 'object' && p !== null && typeof p.provider === 'string')
+    : []
+  const providerOptions = Array.isArray(raw.providerOptions)
+    ? raw.providerOptions.filter((o): o is UsageProviderOption => typeof o === 'object' && o !== null && typeof o.provider === 'string')
+    : []
+  return {
+    options,
+    prefs,
+    currency: typeof raw.currency === 'string' && raw.currency !== '' ? raw.currency : '$',
+    providerPrefs,
+    providerOptions,
+  }
 }
 
 /** Index the host's preference rows by model ref. */
@@ -160,4 +179,36 @@ export function formatPrice(value: number, currency: string): string {
 export function modelLabel(model: string, prefs: PrefIndex, bareName: string): string {
   const alias = prefs.get(model)?.alias?.trim()
   return alias !== undefined && alias !== '' ? alias : bareName
+}
+
+// ── Provider aliases ──────────────────────────────────────────────────────
+
+/** Lookup table: provider name -> its custom short name. */
+export type ProviderAliasIndex = ReadonlyMap<string, string>
+
+/** Index the host's provider-alias rows by provider name. Tolerates the
+ *  payload arriving before the provider-alias feature exists (an older host
+ *  simply sends nothing, and every provider then keeps its own name). */
+export function indexProviderAliases(rows: readonly { provider: string; alias: string }[] | undefined): ProviderAliasIndex {
+  const map = new Map<string, string>()
+  if (!Array.isArray(rows)) return map
+  for (const row of rows) {
+    if (typeof row?.provider !== 'string') continue
+    const alias = row.alias?.trim()
+    if (alias !== undefined && alias !== '') map.set(row.provider, alias)
+  }
+  return map
+}
+
+/**
+ * The label a provider is shown under: its custom short name when one is
+ * stored, otherwise the provider id itself.
+ *
+ * A whitespace-only alias counts as absent for the same reason as the model
+ * variant: clearing the field restores the name instead of blanking the row.
+ */
+export function providerLabel(provider: string, aliases: ProviderAliasIndex, fallback?: string): string {
+  const alias = aliases.get(provider)
+  if (alias !== undefined && alias !== '') return alias
+  return fallback !== undefined && fallback !== '' ? fallback : provider
 }

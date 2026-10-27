@@ -16,7 +16,7 @@ import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import type { UsageStorageDomain, UsageKvTable, UsageDomain } from './context-types.ts'
 import type { UsageSample } from './query.ts'
 import { providerOf } from './query.ts'
-import type { ModelPreference } from './wire.ts'
+import type { ModelPreference, ProviderPreference } from './wire.ts'
 import { z } from 'zod'
 
 /** True when a KvTable.update() failure is the "no record to update" miss
@@ -88,6 +88,16 @@ export const modelPreferenceSchema = z.object({
   updatedAt: z.number(),
 })
 
+/** The provider-alias row schema: no prices, just the label and its edit
+ *  stamp. Kept as its own table rather than folded into `prefs` because the
+ *  key spaces differ (provider id vs "provider/model" ref) and a provider
+ *  alias must survive even when every model ref under it changes. */
+export const providerPreferenceSchema = z.object({
+  provider: z.string(),
+  alias: z.string(),
+  updatedAt: z.number(),
+})
+
 /** The domain's global singleton: the backfill cursor. Session ids already
  *  replayed into the store live here, so a reboot's backfill only folds
  *  sessions it has never seen (a full replay would double every counter —
@@ -127,16 +137,19 @@ export const usageHistoryDomain = defineDomain({
       hoursLiveFirstSeq: {},
     },
   },
-  // Three tables, one domain version: storage-domain builds an empty map for a
-  // declared table the medium does not carry yet, so adding `hours` or `prefs`
-  // needs no version bump (and a bump would reject every existing store
-  // outright — the domain format has no migration path).
+  // Four tables, one domain version: storage-domain builds an empty map for a
+  // declared table the medium does not carry yet, so adding `hours`, `prefs`
+  // or `providers` needs no version bump (and a bump would reject every
+  // existing store outright — the domain format has no migration path).
   tables: {
     days: domainTable<string, UsageDayRow>(usageDayRowSchema),
     hours: domainTable<string, UsageHourRow>(usageHourRowSchema),
     // key: the canonical "provider/model" ref. User-authored, so it is never
     // wiped by /reset (a rebuild replays logs; it must not destroy settings).
     prefs: domainTable<string, ModelPreference>(modelPreferenceSchema),
+    // key: the provider id alone (the left side of a model ref). Also
+    // user-authored configuration, so /reset leaves it alone too.
+    providers: domainTable<string, ProviderPreference>(providerPreferenceSchema),
   },
 })
 
@@ -164,6 +177,7 @@ export class UsageStore {
   private table: UsageKvTable<string, UsageDayRow> | null = null
   private hourTable: UsageKvTable<string, UsageHourRow> | null = null
   private prefsTable: UsageKvTable<string, ModelPreference> | null = null
+  private providersTable: UsageKvTable<string, ProviderPreference> | null = null
   private domainHandle: UsageDomain | null = null
   private ready: Promise<void>
   /** Set when the domain could not be opened (already-open race, corrupted
@@ -195,6 +209,7 @@ export class UsageStore {
     this.table = domain.table('days') as UsageKvTable<string, UsageDayRow>
     this.hourTable = domain.table('hours') as UsageKvTable<string, UsageHourRow>
     this.prefsTable = domain.table('prefs') as UsageKvTable<string, ModelPreference>
+    this.providersTable = domain.table('providers') as UsageKvTable<string, ProviderPreference>
     // One-time rebuild of pre-cursor rows (≤0.1.1 wrote the old request
     // semantics and no turns at all): rows paired with a completely empty
     // cursor cannot be told apart from a half-written new-world store, and
@@ -517,7 +532,7 @@ export class UsageStore {
    *  (turns) model, unlabelled calls the (unknown) one. */
   private targetsOf(sample: UsageSample): { provider: string; model: string } {
     return {
-      provider: sample.turn ? 'default' : providerOf(sample.model && sample.model !== '' ? sample.model : '(unknown)'),
+      provider: sample.turn ? SYNTHETIC_PROVIDER : providerOf(sample.model && sample.model !== '' ? sample.model : '(unknown)'),
       model: sample.turn ? '(turns)' : sample.model && sample.model !== '' ? sample.model : '(unknown)',
     }
   }
@@ -601,6 +616,47 @@ export class UsageStore {
     return [...seen]
   }
 
+  /** Every distinct provider the store has ever recorded (day + hour tables),
+   *  so the provider-alias editor can offer routes the LLM catalogue no longer
+   *  advertises. The synthetic `default` attribution (bare model names and
+   *  turn markers) is filtered out: it is bookkeeping, not a selectable
+   *  provider, and alias-ing it would be meaningless. Degrades to an empty
+   *  list when the store is unavailable, like every other reader. */
+  async distinctProviders(): Promise<string[]> {
+    await this.ready
+    if (this.openError !== undefined) return []
+    const seen = new Set<string>()
+    const isReal = (provider: string): boolean => provider !== '' && provider !== SYNTHETIC_PROVIDER
+    for (const table of [this.table, this.hourTable] as Array<UsageKvTable<string, UsageCounters> | null>) {
+      if (table === null) continue
+      for (const [, row] of table.entries()) {
+        if (isReal(row.provider)) seen.add(row.provider)
+      }
+    }
+    return [...seen]
+  }
+
+  /** Provider-inclusive token total per provider over the WHOLE history (the
+   *  day table only).
+   *
+   *  The hour table is deliberately not summed: `record()` writes the same
+   *  sample into both, so adding them would double every recent token. The
+   *  day table is the superset — the hour upgrade pass only fills rows the
+   *  day pass already covers, it never invents usage the day table lacks.
+   *  Providers with no billed tokens (turn-marker-only rows) are omitted
+   *  rather than reported as zero. */
+  async providerTokenTotals(): Promise<Map<string, number>> {
+    await this.ready
+    const out = new Map<string, number>()
+    if (this.openError !== undefined || this.table === null) return out
+    for (const [, row] of this.table.entries()) {
+      const tokens = row.inputTokens + row.outputTokens + row.cacheReadTokens + row.cacheWriteTokens
+      if (tokens <= 0) continue
+      out.set(row.provider, (out.get(row.provider) ?? 0) + tokens)
+    }
+    return out
+  }
+
   /** Every model preference row, newest edit first. Degrades to an empty list
    *  when the store is unavailable: the panel keeps working without aliases or
    *  prices (it just shows bare model refs and no cost card). */
@@ -633,6 +689,38 @@ export class UsageStore {
     await table.delete(model)
   }
 
+  /** Every provider-alias row, newest edit first. Degrades to an empty list
+   *  when the store is unavailable: the panel then shows bare provider ids,
+   *  exactly like the model rows do without their prefs. */
+  async providerPreferences(): Promise<ProviderPreference[]> {
+    await this.ready
+    if (this.openError !== undefined || this.providersTable === null) return []
+    const out: ProviderPreference[] = []
+    for (const [, row] of this.providersTable.entries()) out.push(row)
+    out.sort((a, b) => b.updatedAt - a.updatedAt)
+    return out
+  }
+
+  /** Upsert one provider alias (keyed by the provider id). */
+  async saveProviderPreference(pref: ProviderPreference): Promise<void> {
+    await this.ready
+    const table = this.providersTable
+    if (this.openError !== undefined || table === null) {
+      throw new Error('usage store degraded: provider preferences are read-only while the domain is unavailable')
+    }
+    await table.put(pref.provider, pref)
+  }
+
+  /** Drop one provider alias; the provider falls back to its bare id. Missing
+   *  keys are a no-op (the reset path must be idempotent). */
+  async deleteProviderPreference(provider: string): Promise<void> {
+    await this.ready
+    const table = this.providersTable
+    if (this.openError !== undefined || table === null) return
+    if (![...table.keys()].includes(provider)) return
+    await table.delete(provider)
+  }
+
   /** The display currency shared by every unit price. */
   async currency(): Promise<string> {
     await this.ready
@@ -657,6 +745,11 @@ export class UsageStore {
 
 /** The currency every unit price is quoted in unless the reader changes it. */
 export const DEFAULT_CURRENCY = '$'
+
+/** The provider bucket for samples that carry no real provider: a bare model
+ *  name resolves to it, and so does every turn marker. It is bookkeeping, not
+ *  a selectable provider, so the provider-alias editor never lists it. */
+export const SYNTHETIC_PROVIDER = 'default'
 
 function emptyDayRow(day: string, provider: string, model: string): UsageDayRow {
   return { ...emptyCounters(provider, model), day }

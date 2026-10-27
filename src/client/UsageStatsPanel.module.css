@@ -427,6 +427,30 @@
   background: color-mix(in srgb, var(--dsw-heat-5) 82%, transparent);
 }
 
+/* ── hourly dot matrix (HourlyHeatmap) ─────────────────────────────────── */
+
+/* 小时点阵的 SVG：一个点 = 一个小时。几何全部由组件算好后写成 SVG 属性
+   （x/y/width/height），所以这里不写宽高 —— CSS 宽高会盖掉 SVG 几何，
+   把每个点钉成固定 px 并撑歪点缝。
+   `max-width: 100%` 是最后一道保险：即使列数求解比容器窄化慢一帧，点阵
+   也不会横向溢出父容器。高度预算见 Heatmap.tsx 顶部注释：
+   6 行 × 8px + 5 × 3px = 63px 点阵本体，加标题行后整块 ≤ 89px。 */
+.heatHourDots {
+  display: block;
+  max-width: 100%;
+  /* 与 `.heatmap` 同样的合成层提升：几百个点各自带 drop-shadow，
+     提升后滚动重绘不再逐点重跑模糊。 */
+  transform: translateZ(0);
+}
+
+/* 点阵里的单点：比周网格的格子更小更密（8px），圆角收到 2px 才不至于
+   被磨成圆形而丢掉"方格阵"的读法。阴影只留一层极浅的 —— 8px 的尺寸
+   撑不住周网格那种双层浮雕，会显脏。 */
+.heatHourCell {
+  border-radius: 2px;
+  filter: drop-shadow(0 0.5px 0.5px var(--dsw-heat-shade));
+}
+
 /* ── daily trend ───────────────────────────────────────────────────────── */
 
 .chart {
@@ -970,6 +994,12 @@
   border-radius: 10px;
   background: var(--dsw-alias-bg-layer-1);
   padding: 12px 14px 14px;
+  /* The scroll context lives HERE, not on .editorList: the column captions
+     (.editorCols) are siblings of the list, so a sticky caption only sticks
+     against an ancestor that actually scrolls. Bounding the whole editor also
+     keeps the toolbar and the tabs in view while the rows scroll. */
+  max-height: 72vh;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -1037,8 +1067,6 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-height: 420px;
-  overflow-y: auto;
 }
 
 .editorRow {
@@ -1126,4 +1154,76 @@
 
 .editorFilter {
   width: 160px;
+}
+
+/* ── editor tabs (models / providers) ──────────────────────────────────── */
+
+.editorTabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+  padding-bottom: 2px;
+}
+
+.editorTab {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  border-radius: 4px 4px 0 0;
+}
+
+.editorTab:hover {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-layer-2);
+}
+
+.editorTab:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 1px;
+}
+
+.editorTabActive {
+  color: var(--dsw-alias-brand-primary);
+  border-bottom-color: var(--dsw-alias-brand-primary);
+}
+
+/* The provider table has three columns, matching ProviderRow's inline grid
+   override: name, the alias field, and the action pair. */
+.editorColsProvider {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) auto;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+  padding-bottom: 2px;
+}
+/* The column captions stick to the top of the editor's scroll box while the
+   rows scroll under them. They need the opaque layer paint, or the rows show
+   through the caption row. */
+.editorCols,
+.editorColsProvider {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--dsw-alias-bg-layer-1);
+  padding-top: 2px;
+  padding-bottom: 4px;
+}
+
+/* ProviderRow overrides the model table's seven-track grid with its own three
+   tracks, so the component needs no inline style. */
+.providerRow {
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) auto;
+}
+
+@media (max-width: 720px) {
+  .providerRow {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
 }

@@ -19,12 +19,43 @@ export function formatTokens(n: number): string {
   return n.toLocaleString('en-US')
 }
 
-/** English-style compact (B/M/K) for axis labels and card sub-values. */
+/** Compact unit tiers for `formatCompact`, largest threshold first. The 1e4
+ *  tier is the Chinese 万 (rendered as "W"), which keeps five-digit token
+ *  counts short for a zh-CN audience: 15000 reads as "1.5W" instead of
+ *  "15.0K". Tiers below 1e4 stay English-style (K), and values under 1e3 are
+ *  emitted as plain integers. */
+const COMPACT_TIERS: ReadonlyArray<readonly [threshold: number, suffix: string]> = [
+  [1e9, 'B'],
+  [1e6, 'M'],
+  [1e4, 'W'],
+  [1e3, 'K'],
+]
+
+/** Compact units (B / M / 万=W / K) for axis labels and card sub-values.
+ *
+ *  One decimal place, with a meaningless trailing ".0" dropped, so 1000 →
+ *  "1K", 15000 → "1.5W" and 1234567 → "1.2M". Tiers are chosen by magnitude,
+ *  so negatives compact too (-15000 → "-1.5W"). Non-finite input degrades to
+ *  a printable placeholder instead of leaking "NaNK" / "InfinityB" into the
+ *  UI: NaN → "—", ±Infinity → "±∞".
+ *
+ *  This is the LOSSY display form — use `formatTokens` when the reader needs
+ *  the exact count. */
 export function formatCompact(n: number): string {
-  if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B'
-  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M'
-  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K'
-  return String(n)
+  if (Number.isNaN(n)) return '—'
+  if (!Number.isFinite(n)) return n > 0 ? '∞' : '-∞'
+  // Round first so a value just under a tier boundary (9999.6) lands in the
+  // tier it will be rendered as, rather than rounding up to "1.0W" from the
+  // tier below.
+  const rounded = Math.round(n)
+  const sign = rounded < 0 ? '-' : ''
+  const magnitude = Math.abs(rounded)
+  for (const [threshold, suffix] of COMPACT_TIERS) {
+    if (magnitude >= threshold) {
+      return sign + (magnitude / threshold).toFixed(1).replace(/\.0$/, '') + suffix
+    }
+  }
+  return sign + String(magnitude)
 }
 
 export function formatPercent(p: number): string {

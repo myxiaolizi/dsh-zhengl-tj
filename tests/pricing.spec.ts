@@ -166,8 +166,37 @@ describe('modelLabel', () => {
 
 describe('normalizePrefsPayload', () => {
   it('degrades a foreign payload to the empty shape', () => {
-    expect(normalizePrefsPayload(undefined)).toEqual({ options: [], prefs: [], currency: '$' })
-    expect(normalizePrefsPayload({ daily: [] })).toEqual({ options: [], prefs: [], currency: '$' })
+    // Every field the panel reads is part of the shape — including the two
+    // provider fields, which are optional on the wire but must still be
+    // carried through the normaliser (dropping them silently disabled the
+    // provider-alias feature).
+    const empty = { options: [], prefs: [], currency: '$', providerPrefs: [], providerOptions: [] }
+    expect(normalizePrefsPayload(undefined)).toEqual(empty)
+    expect(normalizePrefsPayload({ daily: [] })).toEqual(empty)
+  })
+
+  it('carries the provider catalogue and provider aliases through', () => {
+    // The regression this pins: normalizePrefsPayload rebuilt the payload from
+    // a whitelist and forgot the provider fields, so aliases stored on the host
+    // never reached the UI.
+    const payload = normalizePrefsPayload({
+      options: [],
+      prefs: [],
+      currency: '$',
+      providerOptions: [{ provider: 'pa', name: 'Alpha', tokens: 10, seen: true }],
+      providerPrefs: [{ provider: 'pa', alias: 'ALPHA', updatedAt: 1 }],
+    })
+    expect(payload.providerOptions).toEqual([{ provider: 'pa', name: 'Alpha', tokens: 10, seen: true }])
+    expect(payload.providerPrefs).toEqual([{ provider: 'pa', alias: 'ALPHA', updatedAt: 1 }])
+  })
+
+  it('drops malformed provider rows instead of throwing', () => {
+    const payload = normalizePrefsPayload({
+      providerOptions: [{ provider: 'pa', name: 'Alpha', tokens: 0, seen: false }, null, 'nope'],
+      providerPrefs: [{ provider: 'pa', alias: 'A', updatedAt: 1 }, { alias: 'orphan' }],
+    })
+    expect(payload.providerOptions).toHaveLength(1)
+    expect(payload.providerPrefs).toHaveLength(1)
   })
 
   it('drops malformed rows instead of throwing', () => {

@@ -80,6 +80,15 @@ export type UsageStatsKey =
   | 'prefsSearch'
   | 'seenBadge'
   | 'aliasInvalid'
+  | 'saveFailed'
+  | 'resetFailed'
+  | 'providerTab'
+  | 'modelTab'
+  | 'providerColumn'
+  | 'providerAliasHint'
+  | 'providerPrefsEmpty'
+  | 'providerAliasPlaceholder'
+  | 'actionsColumn'
   | 'legendHideHint'
   | 'legendShowHint'
   | 'legendShowAll'
@@ -177,6 +186,15 @@ export const en: Record<UsageStatsKey, string> = {
   prefsSearch: 'Filter models…',
   seenBadge: 'used',
   aliasInvalid: 'Short names may not exceed 24 characters.',
+  saveFailed: 'Could not save this row. Your input is kept — try again.',
+  resetFailed: 'Could not reset this row.',
+  providerTab: 'Providers',
+  modelTab: 'Models',
+  providerColumn: 'Provider',
+  providerAliasHint: 'A short name replaces the provider name everywhere the panel labels it.',
+  providerPrefsEmpty: 'No providers yet: no provider has been recorded in the usage history and none is advertised by the catalogue.',
+  providerAliasPlaceholder: 'e.g. BAC',
+  actionsColumn: 'Actions',
   legendHideHint: 'Click to hide this model',
   legendShowHint: 'Click to show this model',
   legendShowAll: 'Show all',
@@ -275,6 +293,15 @@ export const zh: Record<UsageStatsKey, string> = {
   prefsSearch: '筛选模型…',
   seenBadge: '已用',
   aliasInvalid: '简称不能超过 24 个字符。',
+  saveFailed: '该行保存失败，输入已保留，请重试。',
+  resetFailed: '该行重置失败。',
+  providerTab: '供应商',
+  modelTab: '模型',
+  providerColumn: '供应商',
+  providerAliasHint: '简称会替换面板中所有显示供应商名称的地方。',
+  providerPrefsEmpty: '暂无可配置的供应商：用量记录与供应商目录中都没有供应商。',
+  providerAliasPlaceholder: '例如 BAC',
+  actionsColumn: '操作',
   legendHideHint: '点击隐藏该模型',
   legendShowHint: '点击显示该模型',
   legendShowAll: '全部显示',
@@ -373,6 +400,15 @@ export const zhTW: Record<UsageStatsKey, string> = {
   prefsSearch: '篩選模型…',
   seenBadge: '已用',
   aliasInvalid: '簡稱不可超過 24 個字元。',
+  saveFailed: '該列儲存失敗，輸入已保留，請重試。',
+  resetFailed: '該列重設失敗。',
+  providerTab: '供應商',
+  modelTab: '模型',
+  providerColumn: '供應商',
+  providerAliasHint: '簡稱會取代面板中所有顯示供應商名稱的地方。',
+  providerPrefsEmpty: '尚無可設定的供應商：用量記錄與供應商目錄中都沒有供應商。',
+  providerAliasPlaceholder: '例如 BAC',
+  actionsColumn: '操作',
   legendHideHint: '點擊隱藏該模型',
   legendShowHint: '點擊顯示該模型',
   legendShowAll: '全部顯示',

@@ -116,8 +116,10 @@ describe('UsageStatsSection', () => {
     await act(async () => { await new Promise((r) => { setTimeout(r, 0) }) })
     expect(screen.getByText('12,345 tokens')).toBeTruthy()
     // The Tokens card leads with the compact form and repeats the exact count
-    // underneath, so both readings are available at once.
-    expect(screen.getByText('12.3K')).toBeTruthy()
+    // underneath, so both readings are available at once. 12,345 lands in the
+    // 万/W tier of formatCompact (>= 1e4), so it reads "1.2W" rather than the
+    // old K-tier "12.3K".
+    expect(screen.getByText('1.2W')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'rangePreset.7' }))
     await act(async () => { await new Promise((r) => { setTimeout(r, 0) }) })
     expect(screen.getByText('12,345 tokens')).toBeTruthy()
@@ -278,16 +280,19 @@ describe('rebuild action', () => {
 })
 
 /**
- * The heatmap window (last year) is independent of the range preset, but its
- * FETCH must not be: a request that dies once — a backend still booting, an
- * auth race on first mount — leaves the grid at level-0, and before the fix
- * nothing brought it back short of a full page reload, because `loadHeat` ran
- * only from the mount effect while every other section healed on the next
- * range switch. These tests pin the shared trigger chain (issue #15).
+ * The heatmap renders the SAME aggregate as every other section.
+ *
+ * It used to fire its own `range: 'custom'` request for a fixed year-long day
+ * window, which had two consequences the tests here used to pin: a failed
+ * heatmap-only fetch left the grid at level-0 until the next range switch, and
+ * every panel load cost a second request. The grid is now an HOURLY dot matrix
+ * fed straight from `stats.daily`, so both of those are gone by construction:
+ * there is no heatmap-only fetch left to fail or to duplicate.
+ *
+ * These tests pin the new contract instead.
  */
-describe('heatmap load path', () => {
-  /** A local calendar day `offset` days from today — always inside the
-   *  heatmap's 52-week window, so the year-long fetch has rows to paint. */
+describe('heatmap data path', () => {
+  /** A local calendar day `offset` days from today. */
   const dayAt = (offset: number): string => {
     const d = new Date()
     d.setDate(d.getDate() + offset)
@@ -297,14 +302,21 @@ describe('heatmap load path', () => {
     day, total: 500, byModel: { 'p/m': 500 }, byProvider: { p: 500 },
     requests: 1, turns: 0, cacheHit: 250, cacheMiss: 250,
   })
-  const RANGE = {
+  /** An HOUR bucket key, the shape the dot matrix is built for. */
+  const hourRow = (day: string, hour: number) => ({
+    day: `${day}T${String(hour).padStart(2, '0')}`,
+    total: 500, byModel: { 'p/m': 500 }, byProvider: { p: 500 },
+    requests: 1, turns: 0, cacheHit: 250, cacheMiss: 250,
+  })
+  const range = (granularity: 'day' | 'hour', daily: ReturnType<typeof row>[]) => ({
     from: dayAt(-2), to: dayAt(0), tokens: 1_000, requests: 2, turns: 0,
     cacheHit: 500, cacheMiss: 500, activeDays: 2, topModel: 'p/m', topProvider: 'p',
-    granularity: 'day',
-    daily: [row(dayAt(-2)), row(dayAt(-1))],
+    granularity,
+    daily,
     models: [{ model: 'p/m', provider: 'p', tokens: 1_000, percent: 100 }],
     providers: [{ provider: 'p', tokens: 1_000, percent: 100 }],
-  }
+  })
+  const DAY_RANGE = range('day', [row(dayAt(-2)), row(dayAt(-1))])
 
   const ok = (value: unknown): Response =>
     ({ ok: true, json: async () => ({ ok: true, value }) } as unknown as Response)
@@ -315,82 +327,79 @@ describe('heatmap load path', () => {
     [...container.querySelectorAll('svg[aria-label="heatmap"] rect')]
   const blank = (cell: Element): boolean => (cell.getAttribute('class') ?? '').includes('heatLevel0')
 
-  it('re-reads the window after a failed first load, so the grid heals on the next range switch', async () => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
-    let heatCalls = 0
+  it('paints the dots from the stats aggregate without a second request', async () => {
+    const calls: Array<string> = []
     vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
       const body = init?.body ? JSON.parse(init.body as string) : undefined
-      if (body?.range !== 'custom') return ok(RANGE) // the stats load
-      heatCalls += 1
-      if (heatCalls === 1) throw new TypeError('Failed to fetch') // backend not ready
-      return ok(RANGE)
+      calls.push(String(body?.range ?? 'other'))
+      return ok(DAY_RANGE)
     }))
     const { container } = render(<UsageStatsSection {...({ t } as UsageStatsSectionProps)} />)
     await settle()
 
-    // First attempt died: every cell is blank.
+    // The dots exist and carry values...
     expect(heatCells(container).length).toBeGreaterThan(0)
-    expect(heatCells(container).every(blank)).toBe(true)
-
-    fireEvent.click(screen.getByRole('button', { name: 'rangePreset.7' }))
-    await settle()
-
-    // The next stats load retries the window, and the cells paint.
-    expect(heatCalls).toBe(2)
     expect(heatCells(container).some((cell) => !blank(cell))).toBe(true)
-    logged.mockRestore()
+    // ...and NO custom-range request was made for the heatmap's own benefit.
+    expect(calls).not.toContain('custom')
   })
 
-  it('does not swallow a failed window request silently', async () => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+  it('renders one dot per hour bucket when the range is hour-based', async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
       const body = init?.body ? JSON.parse(init.body as string) : undefined
-      if (body?.range === 'custom') throw new TypeError('Failed to fetch')
-      return ok(RANGE)
+      if (body?.range === 'today') {
+        return ok(range('hour', [
+          hourRow(dayAt(0), 9), hourRow(dayAt(0), 10), hourRow(dayAt(0), 11),
+        ]))
+      }
+      return ok(DAY_RANGE)
     }))
-    render(<UsageStatsSection {...({ t } as UsageStatsSectionProps)} />)
+    const { container } = render(<UsageStatsSection {...({ t } as UsageStatsSectionProps)} />)
     await settle()
-    expect(logged).toHaveBeenCalled()
-    logged.mockRestore()
+
+    fireEvent.click(screen.getByRole('button', { name: 'rangePreset.today' }))
+    await settle()
+
+    // Three hour buckets -> exactly three dots, not one per day.
+    expect(heatCells(container).length).toBe(3)
   })
 
-  it('reads the window exactly once per panel load, the refresh button included', async () => {
-    let heatCalls = 0
-    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
-      const body = init?.body ? JSON.parse(init.body as string) : undefined
-      if (body?.range === 'custom') heatCalls += 1
-      return ok(RANGE)
-    }))
-    render(<UsageStatsSection {...({ t } as UsageStatsSectionProps)} />)
+  it('drops the whole section when the range has no buckets at all', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ok(range('day', []))))
+    const { container } = render(<UsageStatsSection {...({ t } as UsageStatsSectionProps)} />)
     await settle()
-    expect(heatCalls).toBe(1)
 
-    fireEvent.click(screen.getByRole('button', { name: 'refresh' }))
-    await settle()
-    // The refresh already reloads the stats, and the heatmap rides that same
-    // chain — a second explicit call would double the request.
-    expect(heatCalls).toBe(2)
+    // An empty series must not leave an empty box behind: the dot matrix
+    // returns null, so there is no heatmap SVG at all.
+    expect(heatCells(container).length).toBe(0)
   })
 
-  it('re-reads the window after a rebuild too', async () => {
-    let heatCalls = 0
-    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+  it('re-renders the dots after a rebuild, on the same stats reload', async () => {
+    let statsCalls = 0
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url === 'usage/api/reset') {
         return ok({ running: false, total: 0, done: 0, scannedSessions: 0 })
       }
-      const body = init?.body ? JSON.parse(init.body as string) : undefined
-      if (body?.range === 'custom') heatCalls += 1
-      return ok(RANGE)
+      // Only the AGGREGATE request counts here: the panel also loads its prefs
+      // payload on mount, which is a different endpoint and must not be
+      // mistaken for a second stats read.
+      if (url === 'usage/api/prefs') {
+        return ok({ options: [], prefs: [], currency: '$' })
+      }
+      if (url === 'usage/api/range') statsCalls += 1
+      return ok(DAY_RANGE)
     }))
-    render(<UsageStatsSection {...({ t } as UsageStatsSectionProps)} />)
+    const { container } = render(<UsageStatsSection {...({ t } as UsageStatsSectionProps)} />)
     await settle()
-    expect(heatCalls).toBe(1)
+    expect(statsCalls).toBe(1)
+    expect(heatCells(container).length).toBeGreaterThan(0)
 
     fireEvent.click(screen.getByRole('button', { name: 'rebuild' }))
     fireEvent.click(screen.getByRole('button', { name: 'rebuildConfirm' }))
     await settle()
-    // The rebuild replays the store, so the year-long window must be read
-    // again on the same chain the stats reload uses.
-    expect(heatCalls).toBe(2)
+
+    // The rebuild reloads the stats, and the dots ride that same reload.
+    expect(statsCalls).toBe(2)
+    expect(heatCells(container).length).toBeGreaterThan(0)
   })
 })

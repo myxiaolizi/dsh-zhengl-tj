@@ -116,12 +116,50 @@ export interface UsageModelOption {
   seen: boolean
 }
 
+// ── Provider preferences (short alias per provider) ───────────────────────
+
+/**
+ * One provider's short alias: the label the panel shows instead of the raw
+ * provider id ("BrainyAIClaw" → "BAC"). Providers carry no prices — cost is a
+ * per-model property — so this row is the alias alone.
+ */
+export interface ProviderPreference {
+  provider: string // provider id as it appears on a model ref's left side
+  alias: string // "" = no alias, the panel shows the bare provider name
+  updatedAt: number // epoch ms of the last edit
+}
+
+/**
+ * One provider the alias editor offers as a row.
+ *
+ * Same UNION idea as {@link UsageModelOption}: every provider the LLM service
+ * advertises (both directories — adapter-registered and merely configured)
+ * plus every provider the usage store has recorded, so a de-advertised route
+ * keeps its alias editable.
+ */
+export interface UsageProviderOption {
+  provider: string
+  /** Display name from the provider catalogue; falls back to the provider id. */
+  name: string
+  /** Provider-inclusive tokens the store recorded for this provider (all
+   *  time, day table). Zero when the catalogue advertises it but it has never
+   *  been used. */
+  tokens: number
+  /** True when the usage store has recorded this provider. */
+  seen: boolean
+}
+
 /** The alias/price editor's full payload. */
 export interface UsagePrefsPayload {
   options: UsageModelOption[]
   prefs: ModelPreference[]
   /** Display currency symbol shared by every price in the payload. */
   currency: string
+  /** Provider rows for the provider-alias editor. Optional so a host that
+   *  predates the feature (and every older client) still parses the payload. */
+  providerOptions?: UsageProviderOption[]
+  /** Stored provider aliases (newest edit first). Optional for the same reason. */
+  providerPrefs?: ProviderPreference[]
 }
 
 /** One write to the preference store: an upsert, or a reset when `pref` is null. */

@@ -9,6 +9,10 @@
  *   - prefs/save   { model, pref } -> UsagePrefsPayload (upsert one model)
  *   - prefs/reset  { model }       -> UsagePrefsPayload (drop one model's row)
  *   - prefs/currency { currency }  -> UsagePrefsPayload (display currency)
+ *   - prefs/provider/save  { provider, alias } -> UsagePrefsPayload (upsert or
+ *                          clear one provider alias: "" deletes the row)
+ *   - prefs/provider/reset { provider }        -> UsagePrefsPayload (drop one
+ *                          provider's row)
  * The prefix route /usage/api is registered on the webserver; each request
  * passes the browser-trust fence (Host-header loopback, a trusted authority, or
  * this listener's own bind address).
@@ -23,7 +27,7 @@ import { aggregateSamples } from './query.ts'
 import type { Granularity, UsageSample } from './query.ts'
 import type { BackfillStatus, UsageStatsRange, UsageStatsRequest } from './wire.ts'
 import { UsageError, readJsonBody, writeError, writeJson } from './wire.ts'
-import { buildPrefsPayload, normalizeCurrency, normalizePreference } from './prefs.ts'
+import { buildPrefsPayload, normalizeCurrency, normalizePreference, normalizeProviderAlias } from './prefs.ts'
 import { createTrustFence, type TrustFence, type TrustInputs } from './trust-fence.ts'
 
 export interface RoutesDeps {
@@ -233,6 +237,27 @@ export function buildUsageRoute(ctx: Context, deps: RoutesDeps): UsageWebRoute {
       if (method === 'POST' && path === '/usage/api/prefs/currency') {
         const body = (await readJsonBody(req)) as { currency?: unknown }
         await deps.store.setCurrency(normalizeCurrency(body?.currency))
+        writeJson(res, { ok: true, value: await buildPrefsPayload(ctx, deps.store) })
+        return
+      }
+      // ── Provider aliases ───────────────────────────────────────────────
+      // Same user-authored family as the model prefs: /reset never touches it.
+      // An empty alias is the editor's "clear" gesture, so it deletes the row
+      // instead of storing an empty string (which would then need its own
+      // "is this set?" test everywhere).
+      if (method === 'POST' && path === '/usage/api/prefs/provider/save') {
+        const body = (await readJsonBody(req)) as { provider?: unknown; alias?: unknown } | undefined
+        const { provider, alias } = normalizeProviderAlias(body ?? {})
+        if (alias === '') await deps.store.deleteProviderPreference(provider)
+        else await deps.store.saveProviderPreference({ provider, alias, updatedAt: Date.now() })
+        writeJson(res, { ok: true, value: await buildPrefsPayload(ctx, deps.store) })
+        return
+      }
+      if (method === 'POST' && path === '/usage/api/prefs/provider/reset') {
+        const body = (await readJsonBody(req)) as { provider?: unknown } | undefined
+        const provider = typeof body?.provider === 'string' ? body.provider.trim() : ''
+        if (provider === '') throw new UsageError(400, 'usage stats: provider is required')
+        await deps.store.deleteProviderPreference(provider)
         writeJson(res, { ok: true, value: await buildPrefsPayload(ctx, deps.store) })
         return
       }

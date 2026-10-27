@@ -18,19 +18,22 @@
  * semantic tokens. The functionality replicates the reasonix usage stats
  * feature; the implementation is DSH-native.
  */
-import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type RefObject } from 'react'
 import clsx from 'clsx'
-import { Activity, CalendarDays, ChevronDown, ChevronRight, Coins, Cpu, MessageSquare, MessagesSquare, Receipt, SlidersHorizontal } from 'lucide-react'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import { Button, Input, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { DailyTokenUsage, ModelPreference, ModelTokenUsage, ProviderTokenUsage, UsageModelOption, UsagePrefsPayload, UsageStatsRange, UsageStatsRequest } from '../wire.ts'
-import { fetchPrefs, fetchRange, rebuildStats, resetPref, saveCurrency, savePref, UsageApiError } from './api.ts'
+import type { DailyTokenUsage, ModelPreference, ModelTokenUsage, ProviderPreference, ProviderTokenUsage, UsagePrefsPayload, UsageStatsRange, UsageStatsRequest } from '../wire.ts'
+import { fetchPrefs, fetchRange, rebuildStats, resetPref, resetProviderAlias, saveCurrency, savePref, saveProviderAlias, UsageApiError } from './api.ts'
 import { ChartTip } from './ChartTip.tsx'
 import { Donut, useDonutSize, type DonutSegment } from './Donut.tsx'
-import { estimateCost, formatCost, indexPrefs, isPriced, modelLabel, normalizePrefsPayload, type CostEstimate, type CostLine } from './pricing.ts'
-import { formatTokens, formatCompact, formatPercent, cacheRate, cacheRateText, daysBetween, localDay, indexOfDay, bucketAxisLabel, bucketTitle, providerOf, modelNameOf, smoothPath, niceTicks } from './format.ts'
+import { estimateCost, formatCost, indexPrefs, indexProviderAliases, isPriced, modelLabel, normalizePrefsPayload, providerLabel, type CostEstimate, type CostLine } from './pricing.ts'
+import { formatTokens, formatCompact, formatPercent, cacheRate, cacheRateText, localDay, bucketAxisLabel, bucketTitle, providerOf, modelNameOf, smoothPath, niceTicks } from './format.ts'
 import type { UsageStatsKey } from './locales.ts'
 import type { UsageStatsTranslator } from './index.tsx'
 import { statsLineState } from './stats-line-state.ts'
+import { StatCards } from './StatCards.tsx'
+import { PrefEditor } from './PrefEditor.tsx'
+import { HourlyHeatmap } from './Heatmap.tsx'
 import css from './UsageStatsPanel.module.css'
 
 /** The prefs payload before the first fetch: no aliases, no prices. */
@@ -43,14 +46,8 @@ const RANGE_PRESETS = ['today', '3', '7', '14', '30', '90'] as const
 /** How long the rebuild button stays armed without a second press. */
 const REBUILD_ARM_MS = 5000
 
-// The heatmap used to draw a FIXED one-year window regardless of the range
-// preset above it, which made the chart disagree with every other section: a
-// 7-day selection still rendered 52 columns of squares. The window now follows
-// the selected range (see heatWindowFor below); HEAT_WEEKS remains only as the
-// WIDEST window the renderer solves geometry for, so a long custom range still
-// trims to the container instead of overflowing it.
-export const HEAT_MAX_WEEKS = 53
-
+// The heatmap's own components (and the legacy week-grid geometry solver) live
+// in ./Heatmap.tsx; the panel no longer tracks a heatmap-only data window.
 /** The trend chart caps its visible window at 180 days (mirrors reasonix). */
 const TREND_MAX_DAYS = 180
 
@@ -69,39 +66,6 @@ const OTHER_PROVIDER_COLOR = 'var(--dsw-provider-other)'
 
 /** Shared empty key set: one stable identity for a collapsed expand state. */
 const NO_KEYS: ReadonlySet<string> = new Set()
-
-/**
- * The heatmap's data window for a selection.
- *
- * The heatmap follows the range preset above it instead of always drawing the
- * last 365 days:
- *  - a day-based preset / custom range maps to exactly that [from, to];
- *  - the hour-based presets ("today", "last 3 days") still map to whole local
- *    days, because a heatmap cell IS a day;
- *  - the window is clamped to one year, the widest span the renderer's
- *    geometry is solved for (the host refuses spans longer than 366 days).
- *
- * Returns real calendar day keys, so the caller needs no further date math.
- */
-export function heatWindowFor(range: string, customFrom: string, customTo: string): { from: string; to: string } {
-  const to = range === 'custom' && customTo !== '' ? customTo : localDay(0)
-  const daySpan = (n: number): string => {
-    // n days counted inclusively: "last 3 days" = today, -1 and -2.
-    const anchor = range === 'custom' && customTo !== '' ? new Date(`${customTo}T00:00:00`) : new Date()
-    anchor.setDate(anchor.getDate() - (n - 1))
-    const y = anchor.getFullYear()
-    const m = String(anchor.getMonth() + 1).padStart(2, '0')
-    const d = String(anchor.getDate()).padStart(2, '0')
-    return `${y}-${m}-${d}`
-  }
-  if (range === 'custom') {
-    const from = customFrom !== '' ? customFrom : daySpan(HEAT_MAX_WEEKS * 7)
-    return { from, to }
-  }
-  const preset = range === 'today' ? 1 : Number(range)
-  const days = Number.isFinite(preset) && preset > 0 ? Math.min(preset, HEAT_MAX_WEEKS * 7) : 7
-  return { from: daySpan(days), to }
-}
 
 /** Grouped daily rows: the top models stay individual, the tail collapses
  *  into the OTHER_MODEL bucket with the breakdown kept for tooltips. */
@@ -146,30 +110,16 @@ export function UsageStatsPanel({ t }: { t: Translator }): JSX.Element {
   // even when the hovered cell sits near its edge.
   const panelRef = useRef<HTMLDivElement>(null)
 
-  // Heatmap window: it FOLLOWS the range preset (see heatWindowFor). The
-  // window is a day window even for the hour presets, because a heatmap cell
-  // is a day; `stats.daily` in hour mode cannot feed it.
-  const heatWindow = useMemo(
-    () => heatWindowFor(range, customFrom, customTo),
-    [range, customFrom, customTo],
-  )
-  const [heatDaily, setHeatDaily] = useState<DailyTokenUsage[]>([])
-  const heatGenRef = useRef(0)
-
-  const loadHeat = useCallback(async () => {
-    const generation = ++heatGenRef.current
-    try {
-      const res = await fetchRange({ range: 'custom', from: heatWindow.from, to: heatWindow.to })
-      if (heatGenRef.current !== generation) return
-      setHeatDaily(res.daily)
-    } catch (e) {
-      // The heatmap is auxiliary and must never block the panel, but it must
-      // not fail silently either: a failed request (a backend still booting,
-      // an auth race on mount) would leave the grid at level-0 for the rest of
-      // the session. Log the failure; `load` retries on the next range change.
-      console.error('[usage-stats] heatmap window request failed', e)
-    }
-  }, [heatWindow.from, heatWindow.to])
+  // The heatmap rides the SAME aggregate as every other section. It used to
+  // fire its own custom-range request for a fixed year-long day window; once
+  // the grid became an HOURLY dot matrix that request was working against the
+  // feature — the short presets (today / 3 days) already return hour keys in
+  // `stats.daily`, which is exactly the granularity the dots want, while the
+  // long presets return day keys and simply paint one dot per day.
+  //
+  // Dropping the second request also removed a whole failure surface: there is
+  // no longer a heatmap-only fetch that can die while the rest of the panel
+  // heals, because there is no heatmap-only fetch.
 
   const load = useCallback(async () => {
     if (range === 'custom' && (!customFrom || !customTo)) return
@@ -184,17 +134,13 @@ export function UsageStatsPanel({ t }: { t: Translator }): JSX.Element {
       const res = await fetchRange(req)
       if (generationRef.current !== generation) return // stale response
       setStats(res)
-      // The heatmap window now rides the SAME selection, so both surfaces are
-      // re-read together: one trigger chain keeps the grid consistent with the
-      // range buttons instead of drifting to its own year-long window.
-      void loadHeat()
     } catch (e) {
       if (generationRef.current !== generation) return
       setError(e instanceof UsageApiError ? e.message : String(e))
     } finally {
       if (generationRef.current === generation) setLoading(false)
     }
-  }, [range, customFrom, customTo, loadHeat])
+  }, [range, customFrom, customTo])
 
   useEffect(() => {
     void load()
@@ -219,12 +165,19 @@ export function UsageStatsPanel({ t }: { t: Translator }): JSX.Element {
   // Persist one model row (an alias and/or prices), then fold the host's
   // reply straight back into state so the panel re-renders with the new
   // labels and estimate without a second round trip.
+  //
+  // These RETHROW. Swallowing the failure here would make every row believe its
+  // save succeeded — PrefRow only keeps the typed text when the promise
+  // rejects, so a swallowed error silently discarded the edit and left the row
+  // showing stale stored values. The banner carries the message; the rejection
+  // is what tells the row to stay dirty.
   const savePrefRow = useCallback(async (model: string, pref: ModelPreference | null) => {
     try {
       setPrefs(normalizePrefsPayload(await savePref(model, pref)))
       setPrefsError('')
     } catch (e) {
       setPrefsError(e instanceof UsageApiError ? e.message : String(e))
+      throw e
     }
   }, [])
 
@@ -234,6 +187,7 @@ export function UsageStatsPanel({ t }: { t: Translator }): JSX.Element {
       setPrefsError('')
     } catch (e) {
       setPrefsError(e instanceof UsageApiError ? e.message : String(e))
+      throw e
     }
   }, [])
 
@@ -243,6 +197,30 @@ export function UsageStatsPanel({ t }: { t: Translator }): JSX.Element {
       setPrefsError('')
     } catch (e) {
       setPrefsError(e instanceof UsageApiError ? e.message : String(e))
+      throw e
+    }
+  }, [])
+
+  // Provider short names ride the same contract as the model rows: persist,
+  // fold the host's reply back, and rethrow so the row keeps the typed value
+  // when the write fails.
+  const saveProviderPrefRow = useCallback(async (provider: string, pref: ProviderPreference | null) => {
+    try {
+      setPrefs(normalizePrefsPayload(await saveProviderAlias(provider, pref?.alias ?? '')))
+      setPrefsError('')
+    } catch (e) {
+      setPrefsError(e instanceof UsageApiError ? e.message : String(e))
+      throw e
+    }
+  }, [])
+
+  const resetProviderPrefRow = useCallback(async (provider: string) => {
+    try {
+      setPrefs(normalizePrefsPayload(await resetProviderAlias(provider)))
+      setPrefsError('')
+    } catch (e) {
+      setPrefsError(e instanceof UsageApiError ? e.message : String(e))
+      throw e
     }
   }, [])
 
@@ -395,11 +373,26 @@ export function UsageStatsPanel({ t }: { t: Translator }): JSX.Element {
 
   // A model's display label: its custom alias when set, else the bare name.
   // Every surface in the panel goes through this, so an alias typed once shows
-  // up in the legend, the ring's tooltip, the ranked list, the top-model card
-  // and the cost breakdown alike.
+  // up in the legend, the ring's tooltip, the ranked list and the cost
+  // breakdown alike.
   const labelForModel = useCallback(
     (model: string): string => (model === OTHER_MODEL ? t('other') : modelLabel(model, prefIndex, modelNameOf(model))),
     [prefIndex, t],
+  )
+
+  // A provider's display label, the same contract one level up: the stored
+  // short name when set, otherwise the provider id. Provider rows in both the
+  // ring and the ranked list run through this, so a provider alias typed once
+  // shows up everywhere a provider is named.
+  const providerAliases = useMemo(
+    () => indexProviderAliases(prefs.providerPrefs),
+    [prefs.providerPrefs],
+  )
+  const labelForProvider = useCallback(
+    (provider: string): string => (provider === OTHER_PROVIDER
+      ? t('other')
+      : providerLabel(provider, providerAliases)),
+    [providerAliases, t],
   )
 
   // The estimate prices the RAW model rows, not the grouped ones: the Other
@@ -506,11 +499,11 @@ export function UsageStatsPanel({ t }: { t: Translator }): JSX.Element {
           refresh never blanks the whole data area. */}
       {stats && (
         <>
-          <StatCards stats={stats} t={t} estimate={estimate} prefs={prefs} labelForModel={labelForModel} pricedModels={pricedModels} onOpenEditor={() => setShowPriceEditor(true)} />
-          <Heatmap daily={heatDaily} from={heatWindow.from} to={heatWindow.to} t={t} panelRef={panelRef} />
+          <StatCards stats={stats} t={t} estimate={estimate} prefs={prefs} pricedModels={pricedModels} onOpenEditor={() => setShowPriceEditor(true)} />
+          <HourlyHeatmap hourly={stats.daily} t={t} panelRef={panelRef} />
           <DailyTrend models={trendModels} daily={trendDaily} granularity={stats?.granularity ?? 'day'} t={t} colorForModel={colorForModel} panelRef={panelRef} labelForModel={labelForModel} />
           <ModelUsage models={trendModels} t={t} colorForModel={colorForModel} panelRef={panelRef} labelForModel={labelForModel} estimate={estimate} currency={prefs.currency} />
-          <ProviderUsage providers={groupedProviders ?? []} t={t} colorForProvider={colorForProvider} panelRef={panelRef} labelForModel={labelForModel} />
+          <ProviderUsage providers={groupedProviders ?? []} t={t} colorForProvider={colorForProvider} panelRef={panelRef} labelForModel={labelForModel} labelForProvider={labelForProvider} />
           {stats.to && (
             <div className={css.foot}>
               {t('asOf')} {stats.to}
@@ -529,6 +522,8 @@ export function UsageStatsPanel({ t }: { t: Translator }): JSX.Element {
           onSave={savePrefRow}
           onReset={resetPrefRow}
           onCurrency={saveCurrencySymbol}
+          onSaveProvider={saveProviderPrefRow}
+          onResetProvider={resetProviderPrefRow}
         />
       )}
       {!error && stats && isEmptyRange(stats) && (
@@ -634,302 +629,13 @@ function StatsLineOptions({ t }: { t: Translator }) {
   )
 }
 
-function StatCards({ stats, t, estimate, prefs, labelForModel, pricedModels, onOpenEditor }: {
-  stats: UsageStatsRange
-  t: Translator
-  estimate: CostEstimate
-  prefs: UsagePrefsPayload
-  labelForModel: (m: string) => string
-  pricedModels: number
-  onOpenEditor: () => void
-}) {
-  const cards: Array<{ icon: typeof Coins; label: string; value: string; sm?: boolean; wrap?: boolean; hint?: string; modelRef?: boolean; sub?: string; cost?: boolean }> = [
-    // The headline is provider-inclusive (uncached input + output + cached
-    // tokens) — the number a provider dashboard reports for the same calls.
-    // The headline is the compact K/M/B form (the number a provider dashboard
-    // shows); the exact, separator-formatted count stays underneath so the
-    // precise figure is still readable at a glance.
-    { icon: Coins, label: t('tokens'), value: formatCompact(stats.tokens), hint: t('tokensHint'), sub: `${formatTokens(stats.tokens)} ${t('tokensUnit')}` },
-    { icon: MessageSquare, label: t('sessions'), value: String(stats.turns) },
-    { icon: MessagesSquare, label: t('requests'), value: String(stats.requests) },
-    {
-      icon: Activity,
-      label: t('cacheRate'),
-      value: cacheRateText(stats.cacheHit, stats.cacheMiss),
-      hint: t('cacheRateHint'),
-      // The absolute cached volume lives under the percentage: the rate
-      // alone hides how many tokens the cache actually served.
-      sub: `${formatCompact(stats.cacheHit)} ${t('cachedTokens')}`,
-    },
-    { icon: CalendarDays, label: t('activeDays'), value: String(stats.activeDays) },
-    // The cost card is the estimated spend: it replaces a plain numeric card
-    // only when at least one unit price exists, and its action button opens
-    // the editor — the only way to make a "—" number meaningful.
-    {
-      icon: Receipt,
-      label: t('estimatedCost'),
-      value: estimate.anyPriced ? formatCost(estimate.total, prefs.currency) : '—',
-      hint: t('estimatedCostHint'),
-      cost: true,
-      sub: estimate.anyPriced
-        ? (estimate.unpricedTokens > 0
-            ? t('costUnpriced').replace('{tokens}', formatCompact(estimate.unpricedTokens))
-            : `${pricedModels} ${t('priceUnit')}`)
-        : t('costNone'),
-    },
-    // The two long-valued cards bookend the row: total tokens leads it and the
-    // top model closes it, each on a wider track than the four short numerics
-    // between them. The model sits last because it carries the longest text —
-    // the model name over its provider — and the row's end is where that has
-    // the most room before FitText would have to shrink it.
-    { icon: Cpu, label: t('topModel'), value: stats.topModel || '—', hint: t('topModelHint'), modelRef: true },
-  ]
-  return (
-    <div className={css.cards}>
-      {cards.map((c) => (
-        <div className={css.card} data-dsh-usage-glass="card" key={c.label} title={c.hint}>
-          <div className={css.cardHead}>
-            <c.icon className={css.cardIcon} size={14} strokeWidth={2} aria-hidden="true" />
-            <span className={css.cardLabel}>{c.label}</span>
-            {c.cost && (
-              <button type="button" className={css.cardAction} onClick={onOpenEditor} title={t('priceEditorHint')}>
-                <SlidersHorizontal size={12} aria-hidden="true" />
-                {t('priceEditorOpen')}
-              </button>
-            )}
-          </div>
-          {c.modelRef ? (
-            // The model card mirrors the per-model list rows: model name on
-            // line one, provider on line two in the muted small style — not
-            // the raw "provider/model" ref.
-            <div className={clsx(css.cardValue, css.cardValueSm, css.cardModelLines)}>
-              {stats.topModel ? (
-                <>
-                  <span className={css.modelName}>{labelForModel(stats.topModel)}</span>
-                  <span className={css.modelProvider}>{providerOf(stats.topModel)}</span>
-                </>
-              ) : '—'}
-            </div>
-          ) : c.wrap ? (
-            <div className={clsx(css.cardValue, css.cardValueSm, css.cardValueWrap)}>{c.value}</div>
-          ) : c.sub !== undefined ? (
-            <div className={clsx(css.cardValue, css.cardModelLines)}>
-              <FitText text={c.value} className={css.cardValue} maxSize={22} />
-              <div className={css.cardSub}>{c.sub}</div>
-            </div>
-          ) : (
-            <FitText text={c.value} className={clsx(css.cardValue, c.sm && css.cardValueSm)} maxSize={c.sm ? 14 : 22} />
-          )}
-        </div>
-      ))}
-    </div>
-  )
-}
-
-// FitText renders `text` on a single line, shrinking the font until it fits
-// the card width (long token numbers never overflow or wrap).
-function FitText({ text, className, maxSize }: { text: string; className?: string; maxSize: number }) {
-  const ref = useRef<HTMLDivElement>(null)
-  const [size, setSize] = useState(maxSize)
-
-  useLayoutEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const fit = () => {
-      let s = maxSize
-      el.style.fontSize = `${s}px`
-      while (el.scrollWidth > el.clientWidth + 1 && s > 11) {
-        s -= 0.5
-        el.style.fontSize = `${s}px`
-      }
-      setSize(s)
-    }
-    fit()
-    const ro = new ResizeObserver(fit)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [text, maxSize])
-
-  return (
-    <div ref={ref} className={className} style={{ fontSize: size }}>
-      {text}
-    </div>
-  )
-}
-
-// ── Section 4: GitHub-style activity heatmap ──────────────────────────────
-
-// Cell/gap ratio follows reasonix (base 13 / gap 3): a 1px gap against a
-// ~20px grown cell read as tiles touching edge to edge. The gap also equals
-// the legend's own 3px swatch spacing, and the fixed rx matches the legend
-// swatch border-radius, so the key renders at exactly the chart's geometry.
-const HEAT_BASE = 14 // cell size at which column trimming starts
-const HEAT_GAP = 3 // breathing gap between cells; mirrors the legend swatch gap
-const HEAT_RX = 3 // cell corner radius; matches the legend swatch (css .heatCell)
-
-/** One heatmap frame's geometry. */
-export interface HeatGeometry {
-  /** Cell edge in px. */
-  size: number
-  /** Weeks drawn. */
-  cols: number
-  /** Columns actually laid out, including the partial first week. */
-  totalWeeks: number
-}
-
-/**
- * Solve the heatmap's geometry for an available width and a data window.
- *
- * Two rules, in this order: spend spare width on MORE WEEKS (up to the data
- * window), and only then grow the cells to close the remaining gap. When the
- * window does not fit at the base cell size, trim the earliest weeks and keep
- * the base size.
- *
- * `weeks` is the window length in weeks (derived from the selected range), so a
- * 7-day selection solves for ONE column while a 90-day selection solves for
- * thirteen — the chart no longer pads every selection out to a year of empty
- * cells.
- *
- * Two off-by-one traps are handled explicitly, because both produce a real
- * overflow at the page's ~900px content width:
- *  - "does it fit" is tested against `totalWeeks` (the laid-out column count,
- *    one more than `cols` when the first week is partial), not the window size;
- *  - the fitting test reserves the trailing gap, so `baseCols` is derived from
- *    `avail - HEAT_GAP` and the rendered width `cols*(size+GAP)+GAP` can never
- *    exceed `avail`.
- *
- * The growth branch runs only when the solved cell size is still at or above
- * the base size; otherwise the window does not truly fit and the trim branch
- * runs. A `max(BASE, size)` fallback would silently render one column too many.
- * @param avail - available width in px.
- * @param startOffset - leading empty cells of the first week (0..6).
- * @param weeks - the data window's length in weeks (clamped to 1..HEAT_MAX_WEEKS).
- * @returns the cell size, the week count, and the laid-out column count.
- */
-export function heatGeometry(avail: number, startOffset: number, weeks: number = HEAT_MAX_WEEKS): HeatGeometry {
-  const window = Math.max(1, Math.min(HEAT_MAX_WEEKS, Math.ceil(weeks)))
-  const totalWeeks = Math.ceil((window * 7 + startOffset) / 7)
-  const baseCols = Math.max(1, Math.floor((avail - HEAT_GAP) / (HEAT_BASE + HEAT_GAP)))
-  if (baseCols >= totalWeeks) {
-    const size = (avail - HEAT_GAP) / totalWeeks - HEAT_GAP
-    if (size >= HEAT_BASE) return { size, cols: window, totalWeeks }
-  }
-  // `cols * 7` days behind a leading partial week occupy one MORE track than
-  // `cols`, and the SVG viewport is sized from the track count — so a `cols`
-  // that only fits `cols` tracks leaves the newest column outside the viewBox,
-  // clipped to a sliver at the right edge. Drop the OLDEST week in that case:
-  // one fewer week reads far better than a half-drawn newest one, and the
-  // remaining cells grow to fill the width exactly. `cols` was derived from
-  // `avail - GAP`, so the solved size stays at or above the base size; the
-  // floor only guards absurd widths.
-  const tracksFor = (c: number): number => Math.max(c, Math.ceil((c * 7 + startOffset) / 7))
-  let cols = Math.max(1, Math.min(baseCols, window))
-  while (cols > 1 && tracksFor(cols) > baseCols) cols -= 1
-  const totalCols = tracksFor(cols)
-  const size = (avail - HEAT_GAP) / totalCols - HEAT_GAP
-  return { size: Math.max(HEAT_BASE, size), cols, totalWeeks: totalCols }
-}
-
-function Heatmap({ daily, from, to, t, panelRef }: { daily: DailyTokenUsage[]; from: string; to: string; t: Translator; panelRef: RefObject<HTMLDivElement | null> }) {
-  // Memoized so a hover/tip state change re-renders without rebuilding the
-  // per-day lookup (the daily array is stable between fetches).
-  const byDay = useMemo(() => {
-    const map = new Map<string, DailyTokenUsage>()
-    for (const d of daily) map.set(d.day, d)
-    return map
-  }, [daily])
-  const [tip, setTip] = useState<{ day: string; tokens: number; requests: number; cacheHit: number; cacheMiss: number; anchor: Element } | null>(null)
-  const wrapRef = useRef<HTMLDivElement>(null)
-  // The window's length in weeks, solved from the SELECTED range rather than
-  // assumed to be a year: a 7-day selection is one column, a 90-day selection
-  // is thirteen.
-  const windowDays = daysBetween(from, to).length
-  const windowWeeks = Math.max(1, Math.ceil(windowDays / 7))
-  const [geom, setGeom] = useState<HeatGeometry>(() => heatGeometry(HEAT_BASE * HEAT_MAX_WEEKS, 0, windowWeeks))
-
-  useEffect(() => {
-    const el = wrapRef.current
-    if (!el) return
-    const update = () => {
-      const avail = Math.max(1, el.clientWidth - 2)
-      const next = heatGeometry(avail, (indexOfDay(from) + 1) % 7, windowWeeks)
-      // Only commit when the geometry actually changed — the heatmap SVG
-      // width follows `geom.size`, and committing an identical value on
-      // every ResizeObserver callback would feed a render loop and jitter.
-      setGeom((prev) => (prev.size === next.size && prev.cols === next.cols ? prev : next))
-    }
-    update()
-    const ro = new ResizeObserver(update)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [from, windowWeeks])
-
-  const allDays = daysBetween(from, to)
-  if (allDays.length === 0) return null
-  const days = allDays.slice(-Math.min(geom.cols * 7, allDays.length))
-  const max = Math.max(1, ...days.map((d) => byDay.get(d)?.total ?? 0))
-
-  const rows = 7
-  const startOffset = days[0] ? (indexOfDay(days[0]) + 1) % 7 : 0
-  // The solver already knows how many columns the layout has, including the
-  // partial first week, so the SVG width follows it directly.
-  const weeks = geom.totalWeeks
-
-  return (
-    <section className={css.section}>
-      <div className={css.sectionHead}>
-        <h3 className={css.sectionTitle}>{t('heatmap')}</h3>
-        <div className={css.heatLegend}>
-          <span>{t('heatLess')}</span>
-          <i className={clsx(css.heatCell, css.heatLevel1)} style={{ width: geom.size, height: geom.size }} />
-          <i className={clsx(css.heatCell, css.heatLevel2)} style={{ width: geom.size, height: geom.size }} />
-          <i className={clsx(css.heatCell, css.heatLevel3)} style={{ width: geom.size, height: geom.size }} />
-          <i className={clsx(css.heatCell, css.heatLevel4)} style={{ width: geom.size, height: geom.size }} />
-          <i className={clsx(css.heatCell, css.heatLevel5)} style={{ width: geom.size, height: geom.size }} />
-          <span>{t('heatMore')}</span>
-        </div>
-      </div>
-      <div className={css.heatWrap} ref={wrapRef}>
-        <svg className={css.heatmap} width={weeks * (geom.size + HEAT_GAP) + HEAT_GAP} height={rows * (geom.size + HEAT_GAP) + HEAT_GAP} role="img" aria-label={t('heatmap')}>
-          {days.map((day, i) => {
-            const col = Math.floor((i + startOffset) / 7)
-            const row = (i + startOffset) % 7
-            const rec = byDay.get(day)
-            const tokens = rec?.total ?? 0
-            const level = tokens === 0 ? 0 : 1 + Math.floor((tokens / max) * 4)
-            const x = HEAT_GAP + col * (geom.size + HEAT_GAP)
-            const y = HEAT_GAP + row * (geom.size + HEAT_GAP)
-            return (
-              <rect
-                key={day}
-                className={clsx(css.heatCell, level === 0 && css.heatLevel0, level === 1 && css.heatLevel1, level === 2 && css.heatLevel2, level === 3 && css.heatLevel3, level === 4 && css.heatLevel4, level === 5 && css.heatLevel5)}
-                x={x}
-                y={y}
-                width={geom.size}
-                height={geom.size}
-                rx={HEAT_RX}
-                onMouseEnter={(e) => {
-                  // The tip anchors to the hovered cell's viewport rect, so it
-                  // can escape the wrap's overflow clipping and follow scroll.
-                  setTip({ day, tokens, requests: rec?.requests ?? 0, cacheHit: rec?.cacheHit ?? 0, cacheMiss: rec?.cacheMiss ?? 0, anchor: e.currentTarget })
-                }}
-                onMouseLeave={() => setTip(null)}
-              />
-            )
-          })}
-        </svg>
-        {tip && (
-          <ChartTip anchor={tip.anchor} panelRef={panelRef}>
-            <div className={css.tipTitle}>{tip.day}</div>
-            <div>{t('tokens')}: {formatTokens(tip.tokens)}</div>
-            <div>{t('requests')}: {tip.requests}</div>
-            <div>{t('cacheHitRate')}: {cacheRateText(tip.cacheHit, tip.cacheMiss)}</div>
-          </ChartTip>
-        )}
-      </div>
-    </section>
-  )
-}
+// ── Section 4: activity heatmap ──────────────────────────────────────────
+//
+// The grid renderer and its geometry solver now live in ./Heatmap.tsx so the
+// heatmap strategy can be reworked without touching the rest of the panel.
+// These re-exports keep this module's public surface — and the tests that
+// import heatGeometry / HEAT_MAX_WEEKS from it — unchanged.
+export { HEAT_MAX_WEEKS, HourlyHeatmap, heatGeometry, type HeatGeometry } from './Heatmap.tsx'
 
 // ── Section 5: stacked daily token trend ──────────────────────────────────
 
@@ -1355,7 +1061,7 @@ function ModelUsage({ models, t, colorForModel, panelRef, labelForModel, estimat
 // the providers it folded, and each of those opens ITS models (two levels).
 // The hover tip carries the same breakdown for the bar's segments.
 
-function ProviderUsage({ providers, t, colorForProvider, panelRef, labelForModel }: { providers: GroupedProvider[]; t: Translator; colorForProvider: (p: string) => string; panelRef: RefObject<HTMLDivElement | null>; labelForModel: (m: string) => string }) {
+function ProviderUsage({ providers, t, colorForProvider, panelRef, labelForModel, labelForProvider }: { providers: GroupedProvider[]; t: Translator; colorForProvider: (p: string) => string; panelRef: RefObject<HTMLDivElement | null>; labelForModel: (m: string) => string; labelForProvider: (p: string) => string }) {
   const [tip, setTip] = useState<{ provider: string; tokens: number; percent: number; anchor: Element; models: ModelTokenUsage[] } | null>(null)
   const [hover, setHover] = useState<string | null>(null)
   // Two independent expand sets: `openRanked` holds ranked providers — and the
@@ -1378,7 +1084,7 @@ function ProviderUsage({ providers, t, colorForProvider, panelRef, labelForModel
     key: p.provider,
     tokens: p.tokens,
     color: colorForProvider(p.provider),
-    label: `${p.provider === OTHER_PROVIDER ? t('other') : p.provider}: ${formatTokens(p.tokens)} (${formatPercent(p.percent)})`,
+    label: `${labelForProvider(p.provider)}: ${formatTokens(p.tokens)} (${formatPercent(p.percent)})`,
   }))
   const total = providers.reduce((sum, p) => sum + p.tokens, 0)
 
@@ -1406,7 +1112,7 @@ function ProviderUsage({ providers, t, colorForProvider, panelRef, labelForModel
           />
           {tip && (
             <ChartTip anchor={tip.anchor} panelRef={panelRef}>
-              <div className={css.tipTitle}>{tip.provider === OTHER_PROVIDER ? t('other') : tip.provider}</div>
+              <div className={css.tipTitle}>{labelForProvider(tip.provider)}</div>
               <div>{t('total')}: {formatTokens(tip.tokens)}</div>
               <div>{t('percent')}: {formatPercent(tip.percent)}</div>
               {tip.models.length > 0 && (
@@ -1450,11 +1156,11 @@ function ProviderUsage({ providers, t, colorForProvider, panelRef, labelForModel
                         className={css.modelToggle}
                         onClick={(e) => { e.stopPropagation(); flipRanked(p.provider) }}
                         aria-expanded={open}
-                        aria-label={isOther ? t('other') : p.provider}
+                        aria-label={labelForProvider(p.provider)}
                       >
                         {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                       </button>
-                      {isOther ? t('other') : p.provider}
+                      {labelForProvider(p.provider)}
                     </span>
                     {!isOther && <span className={css.modelProvider}>{t('providerModels', { n: p.models.length })}</span>}
                   </div>
@@ -1546,249 +1252,6 @@ function ProviderUsage({ providers, t, colorForProvider, panelRef, labelForModel
           })}
         </ul>
       </div>
-    </section>
-  )
-}
-
-// ── Section 8: model alias & unit-price editor ────────────────────────────
-
-/** One editable row's draft state, seeded from the stored preference. */
-interface PrefDraft {
-  alias: string
-  inputPerM: string
-  outputPerM: string
-  cacheReadPerM: string
-  cacheWritePerM: string
-}
-
-/** Seed a row's draft from the stored preference (prices render without a
- *  trailing ".0" so the field reads like something a human typed). */
-function draftOf(pref: ModelPreference | undefined): PrefDraft {
-  const num = (n: number | undefined): string => (n === undefined || n === 0 ? '' : String(n))
-  return {
-    alias: pref?.alias ?? '',
-    inputPerM: num(pref?.inputPerM),
-    outputPerM: num(pref?.outputPerM),
-    cacheReadPerM: num(pref?.cacheReadPerM),
-    cacheWritePerM: num(pref?.cacheWritePerM),
-  }
-}
-
-/** Parse one price field: blank means "no charge for this bucket". */
-function parsePrice(value: string): number {
-  const trimmed = value.trim()
-  if (trimmed === '') return 0
-  const n = Number(trimmed)
-  return Number.isFinite(n) && n >= 0 ? n : 0
-}
-
-/**
- * The alias/price editor.
- *
- * Rows come from the host and are the UNION of the provider catalogue (the same
- * source Settings → Models lists) and every model the usage store has recorded,
- * so the editor stays in step with the settings page as providers are added.
- *
- * Editing is per row and explicit: a row's fields are a local draft until its
- * Save button is pressed, so a half-typed price never re-prices the whole
- * dashboard on every keystroke.
- */
-function PrefEditor({ t, payload, error, onClose, onSave, onReset, onCurrency }: {
-  t: Translator
-  payload: UsagePrefsPayload
-  error: string
-  onClose: () => void
-  onSave: (model: string, pref: ModelPreference | null) => Promise<void>
-  onReset: (model: string) => Promise<void>
-  onCurrency: (currency: string) => Promise<void>
-}) {
-  const prefIndex = useMemo(() => indexPrefs(payload.prefs), [payload.prefs])
-  const [filter, setFilter] = useState('')
-  const [drafts, setDrafts] = useState<Record<string, PrefDraft>>({})
-  const [saving, setSaving] = useState<string | null>(null)
-  const [aliasError, setAliasError] = useState('')
-  const [currencyDraft, setCurrencyDraft] = useState(payload.currency)
-
-  // The currency field follows the host's value whenever a save round-trips.
-  useEffect(() => { setCurrencyDraft(payload.currency) }, [payload.currency])
-
-  const visible = useMemo(() => {
-    const needle = filter.trim().toLowerCase()
-    if (needle === '') return payload.options
-    return payload.options.filter((o) => o.model.toLowerCase().includes(needle) || o.name.toLowerCase().includes(needle))
-  }, [payload.options, filter])
-
-  /** The row's current draft, defaulting to its stored values. */
-  const draftFor = useCallback(
-    (option: UsageModelOption): PrefDraft => drafts[option.model] ?? draftOf(prefIndex.get(option.model)),
-    [drafts, prefIndex],
-  )
-
-  const edit = (model: string, patch: Partial<PrefDraft>): void => {
-    setAliasError('')
-    setDrafts((prev) => ({ ...prev, [model]: { ...(prev[model] ?? draftOf(prefIndex.get(model))), ...patch } }))
-  }
-
-  const commit = async (option: UsageModelOption): Promise<void> => {
-    const draft = draftFor(option)
-    const alias = draft.alias.trim()
-    if ([...alias].length > 24) {
-      setAliasError(t('aliasInvalid'))
-      return
-    }
-    const anyPrice = parsePrice(draft.inputPerM) > 0 || parsePrice(draft.outputPerM) > 0
-      || parsePrice(draft.cacheReadPerM) > 0 || parsePrice(draft.cacheWritePerM) > 0
-    setSaving(option.model)
-    try {
-      // An empty alias with no price at all is not a preference: store nothing
-      // (and clear any previous row) instead of leaving a meaningless record.
-      await onSave(option.model, alias === '' && !anyPrice
-        ? null
-        : {
-            model: option.model,
-            alias,
-            inputPerM: parsePrice(draft.inputPerM),
-            outputPerM: parsePrice(draft.outputPerM),
-            cacheReadPerM: parsePrice(draft.cacheReadPerM),
-            cacheWritePerM: parsePrice(draft.cacheWritePerM),
-            updatedAt: Date.now(),
-          })
-      setDrafts((prev) => {
-        const next = { ...prev }
-        delete next[option.model]
-        return next
-      })
-    } finally {
-      setSaving(null)
-    }
-  }
-
-  const reset = async (option: UsageModelOption): Promise<void> => {
-    setSaving(option.model)
-    try {
-      await onReset(option.model)
-      setDrafts((prev) => {
-        const next = { ...prev }
-        delete next[option.model]
-        return next
-      })
-    } finally {
-      setSaving(null)
-    }
-  }
-
-  return (
-    <section className={css.editor} data-dsh-usage-glass="editor" aria-label={t('priceEditor')}>
-      <div className={css.editorHead}>
-        <h3 className={css.editorTitle}>{t('priceEditor')}</h3>
-        <div className={css.editorTools}>
-          <label className={css.currencyField}>
-            {t('currencyLabel')}
-            <Input
-              className={clsx(css.currencyInput)}
-              value={currencyDraft}
-              maxLength={4}
-              aria-label={t('currencyLabel')}
-              onChange={(e) => setCurrencyDraft(e.target.value)}
-              onBlur={() => { if (currencyDraft !== payload.currency) void onCurrency(currencyDraft) }}
-              onKeyDown={(e) => { if (e.key === 'Enter') { e.currentTarget.blur() } }}
-            />
-          </label>
-          <Input
-            className={css.editorFilter}
-            placeholder={t('prefsSearch')}
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            aria-label={t('prefsSearch')}
-          />
-          <Button size="sm" variant="ghost" onClick={onClose}>{t('priceEditorClose')}</Button>
-        </div>
-      </div>
-      <p className={css.editorHint}>{t('priceEditorHint')}</p>
-      {(error !== '' || aliasError !== '') && <div className={css.editorError}>{aliasError || error}</div>}
-      {visible.length === 0 ? (
-        <div className={css.editorEmpty}>{t('prefsEmpty')}</div>
-      ) : (
-        <>
-          <div className={css.editorCols} aria-hidden="true">
-            <span>{t('modelColumn')}</span>
-            <span>{t('aliasColumn')}</span>
-            <span>{t('inputPrice')}</span>
-            <span>{t('outputPrice')}</span>
-            <span>{t('cacheReadPrice')}</span>
-            <span>{t('cacheWritePrice')}</span>
-            <span>{t('priceUnit')}</span>
-          </div>
-          <ul className={css.editorList}>
-            {visible.map((option) => {
-              const draft = draftFor(option)
-              const stored = prefIndex.get(option.model)
-              const busy = saving === option.model
-              return (
-                <li key={option.model} className={css.editorRow}>
-                  <div className={css.editorModel}>
-                    <span className={css.editorModelName} title={option.model}>
-                      {option.name}
-                      {option.seen && <span className={css.editorBadge}>{t('seenBadge')}</span>}
-                    </span>
-                    <span className={css.editorModelRef}>{option.provider}</span>
-                  </div>
-                  <Input
-                    className={css.editorPrice}
-                    value={draft.alias}
-                    placeholder={t('aliasPlaceholder')}
-                    aria-label={`${t('aliasColumn')} ${option.model}`}
-                    onChange={(e) => edit(option.model, { alias: e.target.value })}
-                    onKeyDown={(e) => { if (e.key === 'Enter') void commit(option) }}
-                  />
-                  <Input
-                    className={css.editorPrice}
-                    inputMode="decimal"
-                    value={draft.inputPerM}
-                    aria-label={`${t('inputPrice')} ${option.model}`}
-                    onChange={(e) => edit(option.model, { inputPerM: e.target.value })}
-                    onKeyDown={(e) => { if (e.key === 'Enter') void commit(option) }}
-                  />
-                  <Input
-                    className={css.editorPrice}
-                    inputMode="decimal"
-                    value={draft.outputPerM}
-                    aria-label={`${t('outputPrice')} ${option.model}`}
-                    onChange={(e) => edit(option.model, { outputPerM: e.target.value })}
-                    onKeyDown={(e) => { if (e.key === 'Enter') void commit(option) }}
-                  />
-                  <Input
-                    className={css.editorPrice}
-                    inputMode="decimal"
-                    value={draft.cacheReadPerM}
-                    aria-label={`${t('cacheReadPrice')} ${option.model}`}
-                    onChange={(e) => edit(option.model, { cacheReadPerM: e.target.value })}
-                    onKeyDown={(e) => { if (e.key === 'Enter') void commit(option) }}
-                  />
-                  <Input
-                    className={css.editorPrice}
-                    inputMode="decimal"
-                    value={draft.cacheWritePerM}
-                    aria-label={`${t('cacheWritePrice')} ${option.model}`}
-                    onChange={(e) => edit(option.model, { cacheWritePerM: e.target.value })}
-                    onKeyDown={(e) => { if (e.key === 'Enter') void commit(option) }}
-                  />
-                  <div className={css.editorActions}>
-                    <Button size="sm" variant="outline" disabled={busy} onClick={() => { void commit(option) }}>
-                      {busy ? `${t('savingRow')}…` : t('saveRow')}
-                    </Button>
-                    {stored !== undefined && (
-                      <Button size="sm" variant="ghost" disabled={busy} onClick={() => { void reset(option) }}>
-                        {t('resetRow')}
-                      </Button>
-                    )}
-                  </div>
-                </li>
-              )
-            })}
-          </ul>
-        </>
-      )}
     </section>
   )
 }

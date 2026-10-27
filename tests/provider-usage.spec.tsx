@@ -129,6 +129,36 @@ async function renderPanel() {
   return container
 }
 
+/**
+ * Render the panel with provider aliases stored on the host.
+ *
+ * The prefs payload is a SECOND fetch the panel makes on mount, so the stub has
+ * to answer by endpoint: the aggregate for `range`, the prefs payload for
+ * `prefs`. Anything else gets the aggregate, which keeps the pre-existing tests
+ * (that stub one blanket response) working unchanged.
+ */
+async function renderPanelWithProviderAliases(
+  providerPrefs: Array<{ provider: string; alias: string; updatedAt: number }>,
+) {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url === 'usage/api/prefs') {
+      return {
+        ok: true,
+        json: async () => ({
+          ok: true,
+          value: { options: [], prefs: [], currency: '$', providerOptions: [], providerPrefs },
+        }),
+      } as unknown as Response
+    }
+    return { ok: true, json: async () => ({ ok: true, value: range }) } as unknown as Response
+  }))
+  const { container } = render(<UsageStatsSection {...({ t } as UsageStatsSectionProps)} />)
+  await waitFor(() => {
+    expect(container.querySelector('svg[aria-label="providerUsage"] [role="img"][aria-label]')).not.toBeNull()
+  })
+  return container
+}
+
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
@@ -250,5 +280,58 @@ describe('provider usage section', () => {
 
     expect(toggle.getAttribute('aria-expanded')).toBe('true')
     expect(detailNames(detailOf(pfRow))).toEqual(['m7'])
+  })
+})
+
+describe('provider aliases', () => {
+  it('labels every provider surface with the stored short name', async () => {
+    const container = await renderPanelWithProviderAliases([
+      { provider: 'pa', alias: 'ALPHA', updatedAt: 1 },
+      { provider: 'pb', alias: 'BETA', updatedAt: 2 },
+    ])
+    const section = providerSection(container)
+
+    // The ring segment's label carries the alias instead of the provider id.
+    const chart = section.querySelector('svg[aria-label="providerUsage"]')!
+    const labels = Array.from(chart.querySelectorAll('[role="img"][aria-label]'))
+      .map((seg) => seg.getAttribute('aria-label') ?? '')
+    expect(labels.some((label) => label.startsWith('ALPHA:'))).toBe(true)
+    expect(labels.some((label) => label.startsWith('BETA:'))).toBe(true)
+    // ...and the raw ids are gone from the ring.
+    expect(labels.some((label) => label.startsWith('pa:'))).toBe(false)
+
+    // The ranked list rows read the same way.
+    const rowNames = topRows(section).map((el) => el.querySelector('[class*="modelName"]')?.textContent)
+    expect(rowNames).toContain('ALPHA')
+    expect(rowNames).toContain('BETA')
+    expect(rowNames).not.toContain('pa')
+  })
+
+  it('falls back to the provider id for a provider without an alias', async () => {
+    // Only `pa` is aliased: every other provider must keep its own name, which
+    // is what makes the alias an override rather than a replacement scheme.
+    const container = await renderPanelWithProviderAliases([
+      { provider: 'pa', alias: 'ALPHA', updatedAt: 1 },
+    ])
+    const section = providerSection(container)
+
+    const chart = section.querySelector('svg[aria-label="providerUsage"]')!
+    const labels = Array.from(chart.querySelectorAll('[role="img"][aria-label]'))
+      .map((seg) => seg.getAttribute('aria-label') ?? '')
+    expect(labels.some((label) => label.startsWith('ALPHA:'))).toBe(true)
+    expect(labels.some((label) => label.startsWith('pb:'))).toBe(true)
+  })
+
+  it('treats a whitespace-only alias as absent', async () => {
+    // Clearing the field must restore the provider name, not blank the row.
+    const container = await renderPanelWithProviderAliases([
+      { provider: 'pa', alias: '   ', updatedAt: 1 },
+    ])
+    const section = providerSection(container)
+
+    const chart = section.querySelector('svg[aria-label="providerUsage"]')!
+    const labels = Array.from(chart.querySelectorAll('[role="img"][aria-label]'))
+      .map((seg) => seg.getAttribute('aria-label') ?? '')
+    expect(labels.some((label) => label.startsWith('pa:'))).toBe(true)
   })
 })

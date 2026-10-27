@@ -11,12 +11,16 @@
  *  2. Validate and normalise the writes coming from the browser, so a
  *     malformed or hostile body can never poison the stored prices.
  *
+ * The same module also carries the PROVIDER alias layer: one short label per
+ * provider (no prices — spend is a per-model property) and the provider
+ * catalogue the provider editor lists, merged from the same two directories.
+ *
  * The unit prices are per ONE MILLION tokens: every provider quotes them that
  * way, and a per-token float would round-trip badly through JSON.
  */
 
 import type { Context } from './context-types.ts'
-import type { UsageModelOption, ModelPreference, UsagePrefsPayload } from './wire.ts'
+import type { UsageModelOption, ModelPreference, UsagePrefsPayload, UsageProviderOption, ProviderPreference } from './wire.ts'
 import { UsageError } from './wire.ts'
 import { providerOf, modelNameOf } from './shared.ts'
 import type { UsageStore } from './store.ts'
@@ -88,13 +92,67 @@ async function catalogModels(ctx: Context): Promise<Map<string, string>> {
   return out
 }
 
+/**
+ * Read the PROVIDER catalogue the LLM service advertises: the ids of the same
+ * two directories {@link catalogModels} merges, paired with their display name.
+ *
+ * The provider alias editor needs only the directories themselves (no
+ * `listModels` probe): a provider whose adapter is down or whose route is
+ * dormant still has a name worth aliasing. `listProviders` wins the name race
+ * because its `name` is the label the running route reports, while a
+ * configurable-only entry carries the settings-page `displayName`.
+ */
+export async function catalogProviders(ctx: Context): Promise<Map<string, string>> {
+  const out = new Map<string, string>()
+  const llm = ctx.get('llm') as LlmDirectoryFaces | undefined
+  if (llm === undefined) return out
+
+  try {
+    for (const p of llm.listProviders?.() ?? []) {
+      if (typeof p.id !== 'string' || p.id === '') continue
+      out.set(p.id, typeof p.name === 'string' && p.name !== '' ? p.name : p.id)
+    }
+  } catch {
+    // A broken adapter directory must not hide the configurable one below.
+  }
+  try {
+    for (const p of llm.listConfigurableProviders?.() ?? []) {
+      if (typeof p.provider !== 'string' || p.provider === '') continue
+      // First writer wins: the adapter's own `name` is the live label.
+      if (out.has(p.provider)) continue
+      out.set(p.provider, typeof p.displayName === 'string' && p.displayName !== '' ? p.displayName : p.provider)
+    }
+  } catch {
+    // Same: one directory failing must not blank the other.
+  }
+  return out
+}
+
+/** The provider reads the payload builder uses. Declared optional so a store
+ *  stand-in that predates the provider-alias feature (or a test double built
+ *  before it) degrades to "catalogue only" instead of failing the whole
+ *  payload — the same tolerance the model catalogue gets from a missing
+ *  `llm` service. */
+interface ProviderReads {
+  distinctProviders?: () => Promise<string[]>
+  providerTokenTotals?: () => Promise<Map<string, number>>
+  providerPreferences?: () => Promise<ProviderPreference[]>
+}
+
 /** Build the full payload the alias/price editor renders. */
 export async function buildPrefsPayload(ctx: Context, store: UsageStore): Promise<UsagePrefsPayload> {
-  const [catalog, recorded, prefs, currency] = await Promise.all([
+  const [catalog, recorded, prefs, currency, providerCatalog] = await Promise.all([
     catalogModels(ctx),
     store.distinctModels(),
     store.preferences(),
     store.currency(),
+    catalogProviders(ctx),
+  ])
+  const providerReads = store as unknown as ProviderReads
+  const [recordedProviders, providerTokens, providerPrefs]: [string[], Map<string, number>, ProviderPreference[]] = await Promise.all([
+    providerReads.distinctProviders?.() ?? [],
+    providerReads.providerTokenTotals?.() ?? new Map<string, number>(),
+    providerReads.providerPreferences?.() ?? [],
   ])
   const options = new Map<string, UsageModelOption>()
   // Catalogue first (it carries display names), then recorded models fill the
@@ -124,7 +182,54 @@ export async function buildPrefsPayload(ctx: Context, store: UsageStore): Promis
     if (a.seen !== b.seen) return a.seen ? -1 : 1
     return a.model.localeCompare(b.model)
   })
-  return { options: list, prefs, currency: currency || DEFAULT_CURRENCY }
+
+  // ── Provider rows ──────────────────────────────────────────────────────
+  // Same union as the model rows, one level up: the catalogue's providers
+  // (adapter-registered ∪ configured-but-dormant), every provider the usage
+  // store recorded, and any provider the reader already aliased. The token
+  // total comes from one whole-history aggregate (`providerTokenTotals`), so
+  // a `seen` row shows the traffic it actually carried while a
+  // catalogue-but-unused row honestly reports 0.
+  const seenProviders = new Set(recordedProviders)
+  const providerOptions = new Map<string, UsageProviderOption>()
+  for (const [provider, name] of providerCatalog) {
+    providerOptions.set(provider, { provider, name, tokens: providerTokens.get(provider) ?? 0, seen: seenProviders.has(provider) })
+  }
+  for (const provider of recordedProviders) {
+    const existing = providerOptions.get(provider)
+    if (existing !== undefined) {
+      existing.seen = true
+      existing.tokens = providerTokens.get(provider) ?? existing.tokens
+      continue
+    }
+    providerOptions.set(provider, { provider, name: provider, tokens: providerTokens.get(provider) ?? 0, seen: true })
+  }
+  // An alias for a provider that is neither advertised nor recorded still gets
+  // a row: the reader wrote it, and hiding it would make the value uneditable.
+  for (const pref of providerPrefs) {
+    if (providerOptions.has(pref.provider)) continue
+    providerOptions.set(pref.provider, {
+      provider: pref.provider,
+      name: pref.provider,
+      tokens: providerTokens.get(pref.provider) ?? 0,
+      seen: seenProviders.has(pref.provider),
+    })
+  }
+  const providerList = [...providerOptions.values()]
+  // Same ordering rule as the model rows: recorded traffic first, then
+  // catalogue-only entries, each group alphabetically.
+  providerList.sort((a, b) => {
+    if (a.seen !== b.seen) return a.seen ? -1 : 1
+    return a.provider.localeCompare(b.provider)
+  })
+
+  return {
+    options: list,
+    prefs,
+    currency: currency || DEFAULT_CURRENCY,
+    providerOptions: providerList,
+    providerPrefs,
+  }
 }
 
 /** Coerce one price field: missing → 0, a non-number or negative → rejected. */
@@ -163,6 +268,23 @@ export function normalizePreference(body: { model?: unknown; pref?: unknown }): 
       updatedAt: Date.now(),
     },
   }
+}
+
+/** Validate one provider-alias write.
+ *
+ *  The provider is required and trimmed; a blank alias is LEGAL and means
+ *  "clear the alias" (the route deletes the row instead of storing an empty
+ *  one), matching what an emptied text input posts. Any other alias obeys the
+ *  same length cap as a model alias, so a pasted paragraph cannot wreck the
+ *  legend layout. */
+export function normalizeProviderAlias(body: { provider?: unknown; alias?: unknown }): { provider: string; alias: string } {
+  const provider = typeof body.provider === 'string' ? body.provider.trim() : ''
+  if (provider === '') throw new UsageError(400, 'usage stats: provider is required')
+  const alias = typeof body.alias === 'string' ? body.alias.trim() : ''
+  if ([...alias].length > MAX_ALIAS_LEN) {
+    throw new UsageError(400, `usage stats: alias must be at most ${MAX_ALIAS_LEN} characters`)
+  }
+  return { provider, alias }
 }
 
 /** Validate the display-currency write: one to four printable characters. */

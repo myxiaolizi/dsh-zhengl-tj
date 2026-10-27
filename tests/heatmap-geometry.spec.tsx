@@ -17,7 +17,7 @@
  * `totalWeeks` is self-consistent and cannot catch a wrong track count.
  */
 import { describe, expect, it } from 'vitest'
-import { HEAT_MAX_WEEKS, heatGeometry, heatWindowFor, type HeatGeometry } from '../src/client/UsageStatsPanel.tsx'
+import { HEAT_MAX_WEEKS, heatGeometry, type HeatGeometry } from '../src/client/UsageStatsPanel.tsx'
 
 const GAP = 3
 const BASE = 14
@@ -118,51 +118,6 @@ describe('heatGeometry', () => {
 })
 
 // ── the window follows the range selection ────────────────────────────────
-
-describe('heatWindowFor', () => {
-  /** Days between two inclusive day keys. */
-  const span = (from: string, to: string): number =>
-    (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000 + 1
-
-  it('maps every preset to exactly its own span', () => {
-    // The defect being pinned: the chart used to draw 365 days no matter which
-    // preset was selected, so "Today" showed a year of squares.
-    for (const [preset, days] of [['today', 1], ['3', 3], ['7', 7], ['14', 14], ['30', 30], ['90', 90]] as const) {
-      const w = heatWindowFor(preset, '', '')
-      expect(span(w.from, w.to)).toBe(days)
-    }
-  })
-
-  it('ends on today for every preset', () => {
-    const today = new Date()
-    const key = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
-    for (const preset of ['today', '3', '7', '14', '30', '90']) {
-      expect(heatWindowFor(preset, '', '').to).toBe(key)
-    }
-  })
-
-  it('honours a custom range verbatim', () => {
-    const w = heatWindowFor('custom', '2026-01-05', '2026-02-03')
-    expect(w.from).toBe('2026-01-05')
-    expect(w.to).toBe('2026-02-03')
-    expect(span(w.from, w.to)).toBe(30)
-  })
-
-  it('falls back to the widest window when a custom range is half-filled', () => {
-    // The toolbar only submits a custom range once BOTH dates exist; the chart
-    // must not request an empty window in the meantime.
-    const w = heatWindowFor('custom', '', '')
-    expect(span(w.from, w.to)).toBe(HEAT_MAX_WEEKS * 7)
-  })
-
-  it('clamps an over-long custom span to the renderer window', () => {
-    // The host refuses spans beyond a year, and the geometry solver has no
-    // columns for them either: 90 is the longest preset, so nothing clamps
-    // here — but the preset clamp is what keeps a hostile range finite.
-    const w = heatWindowFor('7', '', '')
-    expect(span(w.from, w.to)).toBeLessThanOrEqual(HEAT_MAX_WEEKS * 7)
-  })
-})
 
 describe('heatGeometry window parameter', () => {
   it('solves for the selected window, not a fixed year', () => {

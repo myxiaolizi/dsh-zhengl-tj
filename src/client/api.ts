@@ -85,3 +85,13 @@ export async function resetPref(model: string): Promise<UsagePrefsPayload> {
 export async function saveCurrency(currency: string): Promise<UsagePrefsPayload> {
   return post<UsagePrefsPayload>('prefs/currency', { currency })
 }
+
+/** Persist one provider's short name (an empty alias clears the row). */
+export async function saveProviderAlias(provider: string, alias: string): Promise<UsagePrefsPayload> {
+  return post<UsagePrefsPayload>('prefs/provider/save', { provider, alias })
+}
+
+/** Clear one provider's short name. */
+export async function resetProviderAlias(provider: string): Promise<UsagePrefsPayload> {
+  return post<UsagePrefsPayload>('prefs/provider/reset', { provider })
+}
