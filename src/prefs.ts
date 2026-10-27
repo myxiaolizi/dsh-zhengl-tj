@@ -31,21 +31,52 @@ export const MAX_ALIAS_LEN = 24
  *  above any real catalogue price but still bounds the estimate. */
 export const MAX_UNIT_PRICE = 10_000
 
-/** Read the catalogue the LLM service advertises, tolerating an absent or
- *  failing service (the editor then lists recorded models only). */
+/** The faces of the `llm` service the catalogue merge reads (all optional so a
+ *  host without one of them still yields a usable catalogue). */
+interface LlmDirectoryFaces {
+  listProviders?: () => Array<{ id: string; name: string }>
+  listConfigurableProviders?: () => Array<{ provider: string; displayName: string }>
+  listModels?: (provider: string) => Promise<Array<{ provider?: string; id: string; name?: string }>>
+}
+
+/**
+ * Read the model catalogue the LLM service advertises.
+ *
+ * The merge mirrors what Settings → Models enumerates, which is the UNION of
+ * two directories the service publishes:
+ *  - `listProviders()` — routes with a registered adapter (their `listModels`
+ *    is authoritative and is what the picker actually offers);
+ *  - `listConfigurableProviders()` — every declared provider, registered or
+ *    dormant (a provider the reader configured but has not activated still
+ *    belongs in the list, and its models come from the same `listModels`
+ *    probe, which fails harmlessly while it is dormant).
+ *
+ * Tolerating an absent service or a failing provider is deliberate: the editor
+ * then falls back to the recorded usage alone, which is still useful.
+ */
 async function catalogModels(ctx: Context): Promise<Map<string, string>> {
   const out = new Map<string, string>()
-  const llm = ctx.get('llm') as { listProviders?: () => Array<{ id: string; name: string }>; listModels?: (p: string) => Promise<Array<{ provider: string; id: string; name: string }>> } | undefined
-  if (llm === undefined || typeof llm.listProviders !== 'function' || typeof llm.listModels !== 'function') return out
-  let providers: Array<{ id: string; name: string }> = []
+  const llm = ctx.get('llm') as LlmDirectoryFaces | undefined
+  if (llm === undefined || typeof llm.listModels !== 'function') return out
+
+  // Provider ids from both directories, de-duplicated; the display name is not
+  // needed here (rows are labelled per MODEL) so only the ids survive.
+  const ids = new Set<string>()
   try {
-    providers = llm.listProviders()
+    for (const p of llm.listProviders?.() ?? []) if (typeof p.id === 'string' && p.id !== '') ids.add(p.id)
   } catch {
-    return out
+    // A broken adapter directory must not hide the configurable one below.
   }
-  // One failing provider (an adapter whose endpoint is down) must not blank the
-  // whole catalogue: each provider is read on its own and skipped on failure.
-  const settled = await Promise.allSettled(providers.map(async (p) => ({ provider: p.id, models: await llm.listModels!(p.id) })))
+  try {
+    for (const p of llm.listConfigurableProviders?.() ?? []) if (typeof p.provider === 'string' && p.provider !== '') ids.add(p.provider)
+  } catch {
+    // Same: one directory failing must not blank the other.
+  }
+
+  // One failing provider (an adapter whose endpoint is down, or a dormant route)
+  // must not blank the whole catalogue: each is read on its own and skipped.
+  const listModels = llm.listModels.bind(llm)
+  const settled = await Promise.allSettled([...ids].map(async (provider) => ({ provider, models: await listModels(provider) })))
   for (const result of settled) {
     if (result.status !== 'fulfilled') continue
     for (const model of result.value.models) {

@@ -86,6 +86,37 @@ function ctxWithLlm(): never {
   } as never
 }
 
+/**
+ * A ctx whose two directories DISAGREE: one provider has an adapter, another is
+ * only declared by configuration (dormant), and a third has an adapter that
+ * throws. The editor must list the first two and survive the third, which is
+ * exactly what Settings → Models shows and what a half-configured profile
+ * looks like in practice.
+ */
+function ctxWithSplitDirectories(): never {
+  return {
+    get(name: string) {
+      if (name !== 'llm') return undefined
+      return {
+        listProviders: () => [
+          { id: 'active', name: 'Active' },
+          { id: 'broken', name: 'Broken' },
+        ],
+        listConfigurableProviders: () => [
+          { provider: 'active', displayName: 'Active', settingsNs: 'active', settingsPath: [] },
+          { provider: 'dormant', displayName: 'Dormant', settingsNs: 'dormant', settingsPath: [] },
+        ],
+        listModels: async (provider: string) => {
+          if (provider === 'broken') throw new Error('endpoint down')
+          if (provider === 'active') return [{ provider, id: 'a-one', name: 'A One' }]
+          if (provider === 'dormant') return [{ provider, id: 'd-two', name: 'D Two' }]
+          return []
+        },
+      }
+    },
+  } as never
+}
+
 describe('POST /usage/api/prefs', () => {
   it('lists recorded models and catalogue models together', async () => {
     const store = memoryStore()
@@ -103,6 +134,22 @@ describe('POST /usage/api/prefs', () => {
     // recorded models sort first
     expect(body.value.options[0]!.model).toBe('seen/model-a')
     expect(body.value.options.find((o) => o.model === 'seen/model-a')!.seen).toBe(true)
+  })
+
+  it('merges both provider directories and survives a failing one', async () => {
+    // "Settings → Models" is the union of registered adapters and declared
+    // (possibly dormant) providers; the editor mirrors that, and one adapter
+    // whose endpoint is down must not blank the rest of the catalogue.
+    const store = memoryStore()
+    const route = buildUsageRoute(ctxWithSplitDirectories(), depsFor(store))
+    const res = mockRes()
+    await route.handler(post('/usage/api/prefs', {}), res)
+    expect(res.jsonStatus).toBe(200)
+    const models = (JSON.parse(res.bodyText) as { value: { options: Array<{ model: string }> } })
+      .value.options.map((o) => o.model)
+    expect(models).toContain('active/a-one') // adapter-registered
+    expect(models).toContain('dormant/d-two') // configured but dormant
+    expect(models.some((m) => m.startsWith('broken/'))).toBe(false) // the thrower contributed nothing
   })
 
   it('still lists recorded models when the llm service is absent', async () => {
