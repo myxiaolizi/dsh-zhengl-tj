@@ -312,8 +312,13 @@ export function PrefRow({ t, option, stored, drafts, onSave, onReset }: PrefRowP
             {t('resetRow')}
           </Button>
         )}
-        {rowError !== '' && <span className={css.editorError} role="alert">{rowError}</span>}
       </div>
+      {/* The error lives OUTSIDE the action cell and spans the whole row: the
+          action track is a fixed width and must never be widened by a message,
+          or the row's grid would disagree with the caption row above it. */}
+      {rowError !== '' && (
+        <span className={css.editorRowError} role="alert">{rowError}</span>
+      )}
     </li>
   )
 }
@@ -457,8 +462,13 @@ export function ProviderRow({ t, option, stored, drafts, onSave, onReset }: Prov
             {t('resetRow')}
           </Button>
         )}
-        {rowError !== '' && <span className={css.editorError} role="alert">{rowError}</span>}
       </div>
+      {/* The error lives OUTSIDE the action cell and spans the whole row: the
+          action track is a fixed width and must never be widened by a message,
+          or the row's grid would disagree with the caption row above it. */}
+      {rowError !== '' && (
+        <span className={css.editorRowError} role="alert">{rowError}</span>
+      )}
     </li>
   )
 }

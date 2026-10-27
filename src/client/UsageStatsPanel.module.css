@@ -999,7 +999,10 @@
      against an ancestor that actually scrolls. Bounding the whole editor also
      keeps the toolbar and the tabs in view while the rows scroll. */
   max-height: 72vh;
-  overflow-y: auto;
+  /* Both axes: the vertical one is what lets the caption row stick, the
+     horizontal one keeps the seven columns usable on a narrow panel instead of
+     crushing every price field to a sliver. */
+  overflow: auto;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -1071,7 +1074,7 @@
 
 .editorRow {
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) repeat(4, minmax(0, 0.8fr)) auto;
+  grid-template-columns: minmax(112px, 1.5fr) minmax(0, 1fr) repeat(4, minmax(0, 0.75fr)) 150px;
   gap: 6px;
   align-items: center;
   padding: 6px 0;
@@ -1084,6 +1087,7 @@
 
 .editorModel {
   min-width: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -1119,37 +1123,55 @@
 .editorPrice {
   width: 100%;
   min-width: 0;
+  /* An `input` carries the browser's default intrinsic width (size=20). Without
+     border-box it can overflow its track even at width:100%, which is what made
+     the alias field look wider than its column. */
+  box-sizing: border-box;
 }
 
+/* The action pair sits in a fixed 150px track. It must not wrap and must not
+   push the track wider, or the row's own grid would disagree with the caption
+   row again; the buttons are compacted so both fit side by side. */
 .editorActions {
   display: inline-flex;
   gap: 4px;
   justify-content: flex-end;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.editorActions button {
+  padding: 2px 8px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* A row-scoped error spans every column instead of sitting in one cell: the
+   price tracks stay put and the message gets the full width it needs. */
+.editorRowError {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-danger, #d13b3b);
 }
 
 /* The column captions, aligned with the row grid above. */
 .editorCols {
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) repeat(4, minmax(0, 0.8fr)) auto;
+  grid-template-columns: minmax(112px, 1.5fr) minmax(0, 1fr) repeat(4, minmax(0, 0.75fr)) 150px;
   gap: 6px;
   font-size: 11px;
   color: var(--dsw-alias-label-tertiary);
   padding-bottom: 2px;
 }
 
-@media (max-width: 720px) {
-  /* Below this width the six-column row cannot hold an input per price, so the
-     price fields wrap onto their own line instead of shrinking to unusable
-     slivers. */
-  .editorRow,
-  .editorCols {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  }
-
-  .editorActions {
-    grid-column: 1 / -1;
-    justify-content: flex-start;
-  }
+/* A narrow panel scrolls sideways rather than reflowing the table: a 2-column
+   stacking of a 7-column record separates every price from its caption, which
+   is the misalignment this table exists to avoid. */
+.editorCols,
+.editorList {
+  flex-shrink: 0;
+  min-width: 680px;
 }
 
 .editorFilter {
@@ -1193,11 +1215,13 @@
   border-bottom-color: var(--dsw-alias-brand-primary);
 }
 
-/* The provider table has three columns, matching ProviderRow's inline grid
-   override: name, the alias field, and the action pair. */
+/* The provider table has three columns: name, the alias field, and the action
+   pair. The action track is FIXED, for the same reason the model table's is:
+   an `auto` track sizes itself from its content, so a row carrying a Reset
+   button would compute different track widths than the caption row above it. */
 .editorColsProvider {
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(112px, 1.5fr) minmax(0, 1fr) 150px;
   gap: 6px;
   font-size: 11px;
   color: var(--dsw-alias-label-tertiary);
@@ -1217,13 +1241,8 @@
 }
 
 /* ProviderRow overrides the model table's seven-track grid with its own three
-   tracks, so the component needs no inline style. */
+   tracks, so the component needs no inline style. These MUST equal the
+   `.editorColsProvider` tracks above, or the caption drifts off the data. */
 .providerRow {
-  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) auto;
-}
-
-@media (max-width: 720px) {
-  .providerRow {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  }
+  grid-template-columns: minmax(112px, 1.5fr) minmax(0, 1fr) 150px;
 }
