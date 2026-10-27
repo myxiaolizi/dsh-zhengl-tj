@@ -1,0 +1,1129 @@
+/**
+ * Usage statistics panel styles — a DSH-native CSS Module. Every visual
+ * value rides the DSH semantic tokens (--dsw-alias-* colors, --dsw-font-*
+ * typography, --ds-* motion); no static palette values, no theme selectors.
+ * The heatmap's 5 levels come from the brand accent via color-mix; model
+ * colours are the fixed --dsw-chart-1..5 series (rank order by token
+ * volume) plus the gray --dsw-chart-other step — the reasonix usage-stats
+ * palette, with a lifted dark variant defined below.
+ */
+
+/* The panel as a standalone main panel. It gets the same 960px content column
+   the Plugins page gives it — the declarations below mirror the Plugins page's
+   own `.page` so both entries render identically. Without the cap the charts
+   would stretch to whatever the centre column happens to be.
+
+   One deliberate difference from that page: its 28px top inset is NOT part of
+   this container. A main panel starts at the window's top-left corner, so an
+   inset painted by this scrolling container is a strip above the content that
+   no window-drag region covers; `.backRow` below owns the inset instead, which
+   is the shape the shipped page plugins use for the same reason
+   (`ui-plugin-manager`'s `.pageHead`/`.detailTop` and `ui-schedule`'s page
+   head). The rendered position is unchanged. */
+.page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  box-sizing: border-box;
+  height: 100%;
+  overflow: auto;
+  padding: 0 clamp(24px, 4vw, 48px) 48px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.page > * {
+  width: 100%;
+  max-width: 960px;
+}
+
+/* The standalone panel's back control. Only the main panel renders this seat —
+   the Plugins page entry already sits inside the page's own chrome, which
+   draws its own crumb back to the bundle list. The spacing matches the gap the
+   panel keeps between its own sections.
+
+   The row also carries the panel's former 28px top inset: it starts at the
+   window's top edge, so the whole strip above the back control drags the
+   window (Electron app-regions are geometry, not stacking, so a strip owned by
+   the scrolling container would subtract itself from the drag row beneath
+   it). */
+.backRow {
+  display: flex;
+  box-sizing: border-box;
+  padding-top: 28px;
+  margin-bottom: 18px;
+}
+
+.back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+
+/* ── toolbar ───────────────────────────────────────────────────────────── */
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Each picker (time range) lives in a framed group. */
+.group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+/* A range-preset chip: ghost Button inside the group, active state tinted
+   with the interactive-active fill. */
+.segItem {
+  border-radius: 6px;
+}
+
+.segItem:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.segActive,
+.segActive:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-active);
+  color: var(--dsw-alias-label-primary);
+}
+
+.customRange {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dateInput {
+  width: 150px;
+  flex: 0 0 auto;
+}
+
+.customSep {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* The trailing action pair. It is ONE flex item of the wrapping toolbar: were
+   the two buttons siblings of the toolbar instead, a narrow container could
+   wrap them apart and strand the rebuild button on a line of its own. The
+   container — not the refresh button — carries the trailing auto margin, so
+   the pair always rides the right edge together, and `nowrap` keeps it whole. */
+.actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+/* Both actions share one width, so the pair never changes shape as a label
+   swaps between idle, confirm, and in-flight. 92px is measured rather than
+   guessed: at the sm button's 12px / `0 10px` geometry the widest label across
+   the three languages is English `Rebuilding…` at 91.4px (zh / zh-TW
+   `确认重建？` needs 80.0px), so 92px holds every state in all three without a
+   button ever growing. */
+.refresh,
+.rebuild {
+  flex: 0 0 auto;
+  min-width: 92px;
+}
+
+/* Armed rebuild: red ink on a light red wash, the recipe the host's own
+   destructive card action uses (`ui-plugin-manager`'s `.danger`), including
+   the rebound hover so the outline variant washes red instead of gray. */
+.rebuildArmed,
+.rebuildArmed:hover:not(:disabled) {
+  color: var(--dsw-alias-state-error-primary);
+  border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary) 30%, transparent);
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 8%, transparent);
+  --dsw-alias-interactive-bg-hover: color-mix(in srgb, var(--dsw-alias-state-error-primary) 14%, transparent);
+}
+
+/* ── states ────────────────────────────────────────────────────────────── */
+
+.errorBanner {
+  padding: 10px 14px;
+  border: 1px solid var(--dsw-alias-state-warn-primary);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 12%, transparent);
+  color: var(--dsw-alias-state-warn-label);
+  font-size: 13px;
+}
+
+.loading {
+  padding: 24px;
+  text-align: center;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
+}
+
+.empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
+  border: 1px dashed var(--dsw-alias-border-l2);
+  border-radius: 8px;
+}
+
+/* ── numeric cards ─────────────────────────────────────────────────────── */
+
+/* The two long-valued cards bookend the row — total tokens leads it, the top
+   model closes it — each on a wider track than the four short numerics
+   between them. At the Plugins page's 960px content width that is six columns
+   on one row. */
+.cards {
+  display: grid;
+  grid-template-columns: 1.3fr repeat(4, 1fr) 1.3fr;
+  gap: 10px;
+}
+
+/* Below the width where six cards hold their own, the grid folds to four
+   tracks and the two long cards take two each: they keep their extra width
+   instead of degrading to the numerics' size, and each row still fills. */
+@media (max-width: 720px) {
+  .cards {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .cards > :first-child,
+  .cards > :last-child {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 430px) {
+  .cards {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-1);
+  min-width: 0;
+}
+
+.cardHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cardIcon {
+  color: var(--dsw-alias-label-tertiary);
+  flex: 0 0 auto;
+}
+
+.cardLabel {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The small action inside a card header (the cost card's "Configure").
+   Pushed to the right edge so the label keeps the left rail. */
+.cardAction {
+  appearance: none;
+  background: none;
+  border: 0;
+  margin-left: auto;
+  padding: 1px 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--dsw-alias-brand-primary);
+  border-radius: 4px;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.cardAction:hover {
+  background: var(--dsw-alias-bg-layer-2);
+}
+
+.cardAction:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 1px;
+}
+
+.cardValue {
+  color: var(--dsw-alias-label-primary);
+  font-weight: 600;
+  line-height: 1.15;
+}
+
+.cardValueSm {
+  font-size: 14px;
+}
+
+.cardValueWrap {
+  word-break: break-word;
+}
+
+/* The "most used model" card value: the model name over the provider, the
+   same two-line anatomy as the per-model list rows (modelName/modelProvider
+   classes), instead of the raw "provider/model" ref. */
+.cardModelLines {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* A muted second line under a card value (the absolute cached-token volume
+   under the hit-rate percentage). */
+.cardSub {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+/* ── sections / chart chrome ───────────────────────────────────────────── */
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.sectionHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.trendNote {
+  font-size: 13px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.chartWrap {
+  position: relative;
+  min-width: 0;
+}
+
+/* ── heatmap ───────────────────────────────────────────────────────────── */
+
+.heatWrap {
+  position: relative;
+  /* hidden, not auto: the SVG now fills the container exactly, and an
+     auto scrollbar would flash when a fixed tooltip passes over the wrap's
+     right edge. */
+  overflow: hidden;
+  min-width: 0;
+}
+
+.heatmap {
+  display: block;
+  /* The 364 cells each keep their own two-layer drop-shadow chain (see
+     `.heatCell`) — 728 blurs that the compositor would otherwise re-run on
+     every scroll repaint of the tile, which is what made scrolling this panel
+     drop frames while idle was clean (#4). Promoting the SVG onto its own
+     compositing layer takes that rasterization off the scroll path and leaves
+     the painted result untouched, so the cell depth stays as designed. Note
+     that the promotion is what does the work: `contain: paint` on its own
+     measured no better than no mitigation at all. */
+  transform: translateZ(0);
+}
+
+.heatLegend {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 13px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.heatCell {
+  display: inline-block;
+  border-radius: 3px;
+  /* No width/height here: the SVG cells carry their size as geometry
+     attributes (x/y/width/height), and a CSS width/height would override
+     those on SVG2 rects — pinning every cell to a fixed px and widening the
+     visual gap. The legend swatches carry the same size inline, so both
+     always match the measured geom.size. */
+  /* Depth at this size, WITHOUT a per-cell backdrop-filter: the cells are SVG
+     geometry, where backdrop-filter is accepted by the CSSOM but changes
+     nothing on paint (measured on 364 live cells: the screenshot came out
+     byte-identical to no blur at all). What reads as a glass tile instead is
+     the translucent fill below — it lets the panel's own glass bed through —
+     carried by one hairline highlight over one soft under-shadow. */
+  filter:
+    drop-shadow(0 -0.5px 0 var(--dsw-heat-sheen))
+    drop-shadow(0 0.5px 0.8px var(--dsw-heat-shade));
+}
+
+/* The five heat levels use DeepSeek's brand blue (#4D6BFE) as a fixed ramp,
+   light and dark variants below — never the theme accent, which can read
+   near-black against the base surface in dark mode. level0 (no data) is a
+   neutral empty cell. The cells are SVG <rect>s, so the color rides `fill`
+   (background is a no-op on SVG geometry) — but the legend swatches are HTML,
+   so both declarations stay in step.
+   Each level is mixed a little toward transparent so the bed shows through;
+   the amount is deliberately modest, because the ramp is a DATA encoding and
+   washing it out would cost readability. */
+.heatLevel0 {
+  fill: color-mix(in srgb, var(--dsw-heat-0) 82%, transparent);
+  background: color-mix(in srgb, var(--dsw-heat-0) 82%, transparent);
+}
+
+.heatLevel1 {
+  fill: color-mix(in srgb, var(--dsw-heat-1) 82%, transparent);
+  background: color-mix(in srgb, var(--dsw-heat-1) 82%, transparent);
+}
+
+.heatLevel2 {
+  fill: color-mix(in srgb, var(--dsw-heat-2) 82%, transparent);
+  background: color-mix(in srgb, var(--dsw-heat-2) 82%, transparent);
+}
+
+.heatLevel3 {
+  fill: color-mix(in srgb, var(--dsw-heat-3) 82%, transparent);
+  background: color-mix(in srgb, var(--dsw-heat-3) 82%, transparent);
+}
+
+.heatLevel4 {
+  fill: color-mix(in srgb, var(--dsw-heat-4) 82%, transparent);
+  background: color-mix(in srgb, var(--dsw-heat-4) 82%, transparent);
+}
+
+.heatLevel5 {
+  fill: color-mix(in srgb, var(--dsw-heat-5) 82%, transparent);
+  background: color-mix(in srgb, var(--dsw-heat-5) 82%, transparent);
+}
+
+/* ── daily trend ───────────────────────────────────────────────────────── */
+
+.chart {
+  display: block;
+}
+
+.grid {
+  stroke: var(--dsw-alias-border-l1);
+  stroke-width: 1;
+}
+
+.axis {
+  fill: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+}
+
+.axisRate {
+  fill: var(--dsw-alias-label-tertiary);
+}
+
+.bar {
+  transition: opacity 0.12s ease;
+  /* The hover scaleX must pivot on the bar's own centre: SVG geometry
+     transforms around the SVG origin unless transform-box anchors it to the
+     element's fill box. Without this the scaled bar slides sideways and
+     looks like it vanishes. */
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.barDim {
+  opacity: 0.35;
+}
+
+.barHit {
+  fill: transparent;
+  pointer-events: all;
+}
+
+/* cache hit-rate trend curve: DeepSeek's brand blue (#4D6BFE, the same hue
+   family as the heatmap ramp) — a fixed brand ramp instead of the theme
+   accent, which can read near-black in some themes. */
+.trend {
+  stroke: var(--dsw-trend-line);
+  stroke-width: 2;
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+.trendDot {
+  fill: var(--dsw-trend-line);
+  stroke: var(--dsw-alias-bg-layer-1);
+  stroke-width: 2;
+  pointer-events: none;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.legendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: default;
+}
+
+/* A clickable legend entry (the per-model visibility toggles). It keeps the
+   span's metrics but drops the browser's button chrome, so the row still reads
+   as a legend rather than a toolbar. */
+.legendToggle,
+.legendReset {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.legendToggle:hover,
+.legendReset:hover {
+  color: var(--dsw-alias-label-primary);
+}
+
+.legendToggle:focus-visible,
+.legendReset:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 2px;
+}
+
+/* A model switched off: the label stays (so it can be switched back on) but
+   reads as inactive, and the swatch becomes an outline instead of a fill. */
+.legendOff {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+
+.legendReset {
+  color: var(--dsw-alias-brand-primary);
+  text-decoration: underline;
+}
+
+.legendSwatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.legendTrend {
+  background: var(--dsw-trend-line);
+  width: 14px;
+  height: 3px;
+  border-radius: 2px;
+}
+
+/* ── per-model / per-provider chart + list ─────────────────────────────── */
+
+/* The ring is centred against the list beside it. The list's height is never
+   tied to the chart, so expanding a row cannot stretch anything. */
+.models {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+/* The ring's own wrapper. Its diameter comes from the measured row width (see
+   Donut.tsx), so it must never flex. */
+.donutWrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.donut {
+  display: block;
+}
+
+.donutTrack {
+  stroke: var(--dsw-alias-bg-mask-1);
+}
+
+.donutSeg {
+  transition: stroke-width 0.12s ease, opacity 0.12s ease;
+}
+
+.donutDim {
+  opacity: 0.35;
+}
+
+.donutCenter {
+  fill: var(--dsw-alias-label-primary);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.donutLabel {
+  fill: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+}
+
+.modelList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1 1 260px;
+  min-width: 0;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-1);
+  overflow: hidden;
+}
+
+/* Position column: the row's rank inside its section. The Other bucket holds
+   no single rank, so it renders an empty (but equally wide) cell. */
+.modelRank {
+  flex: 0 0 auto;
+  min-width: 14px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.modelRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+}
+
+.modelRow:last-child {
+  border-bottom: none;
+}
+
+/* "Other" aggregate row: the entire row is clickable to expand/collapse the
+   detail list. The chevron button inside it stops propagation so
+   double-firing is avoided. */
+.modelRowExpandable {
+  cursor: pointer;
+}
+
+/* "Other" row toggle (chevron) that expands the aggregated tail models. */
+.modelToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin-right: 4px;
+  border: none;
+  background: none;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+/* Expanded detail rows: indented, slightly recessed. */
+.modelRowSub {
+  padding-left: 28px;
+  background: color-mix(in srgb, var(--dsw-alias-bg-layer-2) 55%, transparent);
+  font-size: 13px;
+}
+
+/* Second-level indent: a model row inside a provider that is itself folded
+   into the Other bucket. Wider than .modelRowSub so the nesting stays
+   readable. Declared after it — same specificity, so this one wins. */
+.modelRowDeep {
+  padding-left: 48px;
+}
+
+/* "Other" details expand with an accordion: the wrapper is a grid whose
+   single track animates 0fr → 1fr. */
+.modelOtherWrap {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.25s ease;
+}
+
+.modelOtherOpen {
+  grid-template-rows: 1fr;
+}
+
+.modelOtherList {
+  overflow: hidden;
+  min-height: 0;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* Two-line row anatomy: [swatch] [name / provider] ……… [tokens / share].
+   The name block takes the free width; the values block hugs the right. */
+.modelId {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.modelValues {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  flex: 0 0 auto;
+}
+
+.modelName {
+  color: var(--dsw-alias-label-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.modelProvider {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modelTokens {
+  color: var(--dsw-alias-label-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.modelPct {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The estimated spend under a row's tokens. It appears only once some price
+   exists, so the list never grows a column full of dashes on a fresh install. */
+.modelCost {
+  color: var(--dsw-alias-brand-primary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── tooltips ──────────────────────────────────────────────────────────── */
+
+/* Tooltips render as fixed-position portals on document.body (see ChartTip),
+   so they escape every ancestor's clipping and never overflow the settings
+   panel: ChartTip clamps each tip inside the panel bounds and flips it above
+   the hovered element when there is no room below. The plate follows the
+   active theme: the DSH overlay token is a light gray in light mode and a
+   dark gray under body[data-ds-dark-theme], so the tip reads correctly in
+   both instead of staying dark in light mode. */
+.tip {
+  position: fixed;
+  /* The tip is portaled to document.body, so it competes with the settings
+     modal itself (z-index 1000) for the top layer: 100 would sit under the
+     modal and the tip would be invisible. 1100 matches the official
+     toast/portaled-menu layer, which is exactly the "over a modal" tier. */
+  z-index: 1100;
+  pointer-events: none;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-overlay);
+  border: 1px solid var(--dsw-alias-border-l2);
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  box-shadow: 0 2px 12px var(--dsw-alias-bg-mask-2);
+  white-space: nowrap;
+}
+
+.tipTitle {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.tipRow {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* Hover tooltip breakdown rows for the "Other" aggregate: indented, muted,
+   same gray swatch as the Other step. */
+.tipRowOther {
+  padding-left: 8px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.tipBreakdown {
+  border-top: 1px solid var(--dsw-alias-border-l1);
+  margin-top: 4px;
+  padding-top: 4px;
+}
+
+.foot {
+  font-size: 13px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* ── bottom preference rows (sidebar entry + bottom-bar enhancements) ── */
+
+/* One bordered card holding all three preference rows, separated by hairline
+   dividers — the compact settings-group anatomy instead of three standalone
+   cards. */
+.prefGroup {
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+.prefRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+}
+
+.prefRow + .prefRow {
+  border-top: 1px solid var(--dsw-alias-border-l1);
+}
+
+.entryOptionText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.entryOptionTitle {
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-primary);
+}
+
+.entryOptionDesc {
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* The switch control: the official DSH switch anatomy (track + thumb, the
+   \"on\" state flips the track to the business primary and slides the thumb)
+   scaled up from the 20x10 toolbar variant to a comfortably clickable
+   40x22 row switch with an 18px thumb. */
+.switch {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.switchTrack {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: 40px;
+  height: 22px;
+  border-radius: 11px;
+  background: var(--dsw-alias-border-l2);
+  transition: background-color 120ms var(--ds-ease-in-out);
+}
+
+.switchThumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--dsw-alias-bg-layer-1);
+  transition: transform 120ms var(--ds-ease-in-out);
+}
+
+.switchTrack[data-on='true'] {
+  background: var(--dsw-alias-state-business-primary);
+}
+
+.switchTrack[data-on='true'] .switchThumb {
+  transform: translateX(18px);
+}
+
+/* ── chart palette ──────────────────────────────────────────────────────── */
+
+/* Light variant (the theme's default): model colours are the reasonix
+   usage-stats palette (rank order by token volume + gray Other) with a
+   white veil mixed in (color-mix 30% white) — the raw hues read dark and
+   heavy on the light card surface, and the veil lifts lightness and dulls
+   saturation the way a translucent white overlay would, keeping the hues
+   colourful instead of muddy. The heatmap ramp is DeepSeek's brand blue
+   (#4D6BFE) stepping from a pale tint to the full blue; the hit-rate curve
+   rides the same brand hue.
+   Ranks 6-10 extend the reasonix five to ten (this plugin's addition): each
+   is picked to keep the ten hues apart on both themes. */
+.panel {
+  --dsw-heat-0: #ebedf0;
+  --dsw-heat-1: #dbe3ff;
+  --dsw-heat-2: #b7c5ff;
+  --dsw-heat-3: #8ea4ff;
+  --dsw-heat-4: #6884ff;
+  --dsw-heat-5: #4d6bfe;
+  /* Heatmap cell depth: a highlight above, a shade below. Light trays need
+     the stronger pair; the dark tray below lifts the shade instead. */
+  --dsw-heat-sheen: rgb(255 255 255 / 0.55);
+  --dsw-heat-shade: rgb(0 0 0 / 0.20);
+  --dsw-trend-line: #4d6bfe;
+  --dsw-chart-1: color-mix(in srgb, #0576ff 70%, white);
+  --dsw-chart-2: color-mix(in srgb, #2f6f37 70%, white);
+  --dsw-chart-3: color-mix(in srgb, #c46212 70%, white);
+  --dsw-chart-4: color-mix(in srgb, #975bf1 70%, white);
+  --dsw-chart-5: color-mix(in srgb, #d34591 70%, white);
+  --dsw-chart-6: color-mix(in srgb, #0d8a8a 70%, white);
+  --dsw-chart-7: color-mix(in srgb, #b3341f 70%, white);
+  --dsw-chart-8: color-mix(in srgb, #7a9018 70%, white);
+  --dsw-chart-9: color-mix(in srgb, #4b3fd0 70%, white);
+  --dsw-chart-10: color-mix(in srgb, #d4a017 70%, white);
+  --dsw-chart-other: color-mix(in srgb, #576270 70%, white);
+  /* Provider series: a separate five-hue set for the provider section, so a
+     provider never wears a model's colour. */
+  --dsw-provider-1: color-mix(in srgb, #1f7a8c 70%, white);
+  --dsw-provider-2: color-mix(in srgb, #6a8e3a 70%, white);
+  --dsw-provider-3: color-mix(in srgb, #a15c2f 70%, white);
+  --dsw-provider-4: color-mix(in srgb, #7b5ea7 70%, white);
+  --dsw-provider-5: color-mix(in srgb, #b03a5b 70%, white);
+  --dsw-provider-other: color-mix(in srgb, #576270 70%, white);
+}
+
+/* Dark variant: the same reasonix hues under a thicker white veil
+   (35% — dark surfaces need the extra lift), so segments read soft and
+   bright instead of sinking into the background. */
+@media (prefers-color-scheme: dark) {
+  .panel {
+    --dsw-heat-0: #21262d;
+    --dsw-heat-1: #2f4bd0;
+    --dsw-heat-2: #4d6bfe;
+    --dsw-heat-3: #6e8bff;
+    --dsw-heat-4: #93aaff;
+    --dsw-heat-5: #c4d0ff;
+    /* Same depth pair, recalibrated: a dark tray swallows a light shade. */
+    --dsw-heat-sheen: rgb(255 255 255 / 0.30);
+    --dsw-heat-shade: rgb(0 0 0 / 0.50);
+    --dsw-trend-line: #7d95ff;
+    --dsw-chart-1: color-mix(in srgb, #0576ff 65%, white);
+    --dsw-chart-2: color-mix(in srgb, #2f6f37 65%, white);
+    --dsw-chart-3: color-mix(in srgb, #c46212 65%, white);
+    --dsw-chart-4: color-mix(in srgb, #975bf1 65%, white);
+    --dsw-chart-5: color-mix(in srgb, #d34591 65%, white);
+    --dsw-chart-6: color-mix(in srgb, #0d8a8a 65%, white);
+    --dsw-chart-7: color-mix(in srgb, #b3341f 65%, white);
+    --dsw-chart-8: color-mix(in srgb, #7a9018 65%, white);
+    --dsw-chart-9: color-mix(in srgb, #4b3fd0 65%, white);
+    --dsw-chart-10: color-mix(in srgb, #d4a017 65%, white);
+    --dsw-chart-other: color-mix(in srgb, #576270 65%, white);
+    --dsw-provider-1: color-mix(in srgb, #1f7a8c 65%, white);
+    --dsw-provider-2: color-mix(in srgb, #6a8e3a 65%, white);
+    --dsw-provider-3: color-mix(in srgb, #a15c2f 65%, white);
+    --dsw-provider-4: color-mix(in srgb, #7b5ea7 65%, white);
+    --dsw-provider-5: color-mix(in srgb, #b03a5b 65%, white);
+    --dsw-provider-other: color-mix(in srgb, #576270 65%, white);
+  }
+}
+
+/* ── model alias / unit-price editor ───────────────────────────────────── */
+
+.editor {
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-1);
+  padding: 12px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.editorHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.editorTitle {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.editorHint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.editorTools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.currencyField {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.currencyInput {
+  width: 52px;
+  text-align: center;
+}
+
+.editorError {
+  font-size: 12px;
+  color: var(--dsw-alias-label-danger, #d13b3b);
+}
+
+.editorEmpty {
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+  padding: 6px 0;
+}
+
+/* The row list scrolls inside a bounded box: a profile can carry hundreds of
+   models and the panel must stay usable. */
+.editorList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.editorRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) repeat(4, minmax(0, 0.8fr)) auto;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 0;
+  border-top: 1px solid var(--dsw-alias-border-l1);
+}
+
+.editorRow:first-child {
+  border-top: 0;
+}
+
+.editorModel {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.editorModelName {
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editorModelRef {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editorBadge {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 1.5;
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.editorPrice {
+  width: 100%;
+  min-width: 0;
+}
+
+.editorActions {
+  display: inline-flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+/* The column captions, aligned with the row grid above. */
+.editorCols {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) repeat(4, minmax(0, 0.8fr)) auto;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+  padding-bottom: 2px;
+}
+
+@media (max-width: 720px) {
+  /* Below this width the six-column row cannot hold an input per price, so the
+     price fields wrap onto their own line instead of shrinking to unusable
+     slivers. */
+  .editorRow,
+  .editorCols {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .editorActions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+}
+
+.editorFilter {
+  width: 160px;
+}

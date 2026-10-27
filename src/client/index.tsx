@@ -1,0 +1,306 @@
+/**
+ * The "Usage statistics" panel's browser half.
+ *
+ * The panel renders in TWO places, both fed by the same component:
+ *  - the Plugins page, inside this bundle's own detail page (the keyed
+ *    `plugins.bundle.config` slot, keyed by this bundle's npm package name);
+ *  - a global main panel of its own, reached from the "Usage statistics" row
+ *    the sidebar draws under New Session beside the shipped global panels.
+ *
+ * The sidebar row is the quick way in, and it deliberately does NOT ride
+ * `sidebar.footer.action`: that seat is a single flex row shared with every
+ * other plugin's footer action, so an entry there competes for width with its
+ * neighbours instead of getting a row of its own. A `sidebar.panellist` row is
+ * a seat no other plugin shares, and the row is always present (like the
+ * shipped panel rows), so there is no preference to control it.
+ *
+ * Type note: the host slot contracts this file needs are mirrored in
+ * src/context-types.ts rather than imported from the owning packages, which is
+ * this plugin's standing convention for host contracts.
+ */
+import type { Context, UsagePluginConfigOwnerProps } from '../context-types.ts'
+// Type-only: pulls the sidebar's SlotMap merge ('sidebar.panellist') into this
+// program so the row registration below typechecks against the shell's
+// declared hole. Cross-plugin collaboration goes through cordis services; a
+// value import fails the client bundle-purity gate.
+import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
+// Type-only: pulls the composer.dock SlotMap merge (conversation contract) so
+// the stats-line takeover registration below typechecks against the declared hole.
+import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type {} from '@deepseek-ai/dsh-client-locale/client'
+import type { PropsLocale, PropsRuntime, TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
+import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
+import { ArrowLeft } from 'lucide-react'
+import { UsageStatsPanel } from './UsageStatsPanel.tsx'
+import { StatsIcon } from './stats-icon.tsx'
+import { StatsActivityEntry, StatsLineEnhanced, StatsUsageEntry } from './StatsLineEnhanced.tsx'
+import { LOCALE_NS, en, zh, zhTW, type UsageStatsKey } from './locales.ts'
+import { isCompatibleGlass, whenGlassReady } from './glass.ts'
+import css from './UsageStatsPanel.module.css'
+
+/** This bundle's npm package name — the key the Plugins page matches on. */
+export const BUNDLE_NAME = 'dsh-zhengl-tj'
+
+/** The id shared by the sidebar row and the main panel it selects. */
+export const PANEL_ID = 'usage-stats'
+
+/** Where the row sits among the global panels: after the shipped ones. */
+const PANEL_ORDER = 30
+
+/** The attribute every glass-eligible surface in this bundle carries. The
+ *  panel's class names are CSS Module hashes (`[hash]_local`), so a static
+ *  selector cannot name them; this attribute is the stable handle the
+ *  background plugin's glass registry matches on. The value splits the two
+ *  recipes: the panel surfaces take the registry's `fill` mode (the registry
+ *  takes their own paints over), while the stat dialogs — the two popovers
+ *  under the composer — keep their official menu fill and join the sheet
+ *  for the shared sheen + blur chain (`token` mode). */
+const GLASS_ATTR_SELECTOR = '[data-dsh-usage-glass]'
+const GLASS_DIALOG_SELECTOR = '[data-dsh-usage-glass="dialog"]'
+const GLASS_PANEL_SELECTOR = `${GLASS_ATTR_SELECTOR}:not(${GLASS_DIALOG_SELECTOR})`
+
+/** The typed translator seat the framework injects for this namespace. */
+export type UsageStatsTranslator = TranslateNS<typeof LOCALE_NS>
+
+export type UsageStatsSectionProps =
+  UsagePluginConfigOwnerProps
+  & PropsLocale<typeof LOCALE_NS>
+
+/** The main-panel share: the locale seat plus the back control's action. */
+export type UsageStatsPanelPageProps = PropsLocale<typeof LOCALE_NS> & {
+  /** Return to whatever the reader was looking at before this panel. */
+  goBack: () => void
+}
+
+declare module '@deepseek-ai/dsh-client-ui-slots' {
+  interface LocaleNamespaceMap {
+    'usageStats': UsageStatsKey
+  }
+}
+
+export const inject = ['slots', 'locale', 'layout']
+
+/** The panel as the Plugins page renders it: the page owns the title, the
+ *  icon, and the crumb, so this is the bare panel. */
+export function UsageStatsSection(props: UsageStatsSectionProps): JSX.Element {
+  return <UsageStatsPanel t={props.t} />
+}
+
+/** The panel as a standalone main panel, wrapped in the same 960px content
+ *  column the Plugins page gives it so both entries look identical.
+ *
+ *  Only this entry carries the back control. The Plugins page entry sits in
+ *  the page's own chrome, which already draws a crumb back to the bundle list,
+ *  so a second control there would be noise rather than help. */
+export function UsageStatsPanelPage(props: UsageStatsPanelPageProps): JSX.Element {
+  return (
+    <div className={css.page}>
+      <div className={css.backRow}>
+        <Button size="sm" variant="ghost" className={css.back} onClick={props.goBack}>
+          <ArrowLeft size={14} strokeWidth={2} aria-hidden="true" />
+          {props.t('back')}
+        </Button>
+      </div>
+      <UsageStatsPanel t={props.t} />
+    </div>
+  )
+}
+
+/** The sidebar row's glyph; the sidebar owns the button, the label, and the
+ *  selected state around it. */
+export function StatsPanelIcon({ size }: PropsRuntime<'sidebar.panellist'>): JSX.Element {
+  return <StatsIcon size={size} />
+}
+
+/** The composer dock slot the bottom-bar takeover shadows. */
+const COMPOSER_DOCK = 'conversation.composer.dock'
+
+/** The pre-split takeover: ONE entry at the official 'stats' id, rendering the
+ *  whole row (DSH <= 0.2.0-rc.2). */
+function installStatsRowEntry(ctx: Context): () => void {
+  return ctx.slots.register({
+    name: COMPOSER_DOCK,
+    id: 'stats',
+    order: 0,
+    priority: -1,
+    locale: LOCALE_NS,
+  }, StatsLineEnhanced)
+}
+
+/** The split takeover: one entry per official pill, each shadowed at its own
+ *  id (DSH >= 0.2.1-alpha.1). */
+function installSplitDockEntries(ctx: Context): () => void {
+  const offActivity = ctx.slots.register({
+    name: COMPOSER_DOCK,
+    id: 'activity',
+    order: 0,
+    priority: -1,
+    locale: LOCALE_NS,
+  }, StatsActivityEntry)
+  const offUsage = ctx.slots.register({
+    name: COMPOSER_DOCK,
+    id: 'usage',
+    order: 1,
+    priority: -1,
+    locale: LOCALE_NS,
+  }, StatsUsageEntry)
+  return () => { offUsage(); offActivity() }
+}
+
+export function apply(ctx: Context): void {
+  // Register the three dictionaries into the shared locale registry; the
+  // disposers run on fiber disposal so re-activation (HMR) re-registers.
+  ctx.effect(() => {
+    const offZh = ctx.locale.register(LOCALE_NS, 'zh', zh)
+    const offEn = ctx.locale.register(LOCALE_NS, 'en', en)
+    const offZhTw = ctx.locale.register(LOCALE_NS, 'zh-TW', zhTW)
+    return () => { offZh(); offEn(); offZhTw() }
+  }, 'dsh-zhengl-tj: dictionaries')
+
+  // Join the background plugin's frosted-glass sheet when it is installed,
+  // in the two modes its registry documents. `fill` for the panel surfaces:
+  // they paint with `--dsw-alias-bg-layer-*` and `--dsw-alias-bg-overlay`,
+  // none of which the bridge's `token` list covers, so the registry has to
+  // take the fill over as well as add the sheen and blur. `token` for the
+  // stat dialogs: they already paint the official menu material (`--dsw-
+  // specific-menu` plus the official blur, see StatsLineEnhanced.module.css)
+  // and only join the shared sheen + blur chain — the same treatment the
+  // bridge gives the official stat dialogs. Nothing is value-imported from
+  // that plugin — the contract is a browser global plus a ready event — so a
+  // user who does not have it resolves null here and every surface keeps its
+  // own paint. The handles are disposed with the fiber, which is also what
+  // retracts the rules on uninstall.
+  ctx.effect(() => {
+    const unregisters: Array<() => void> = []
+    let disposed = false
+    void whenGlassReady().then((glass) => {
+      if (disposed || !isCompatibleGlass(glass)) return
+      unregisters.push(glass.register({
+        plugin: BUNDLE_NAME,
+        selectors: [GLASS_PANEL_SELECTOR],
+        mode: 'fill',
+      }))
+      unregisters.push(glass.register({
+        plugin: BUNDLE_NAME,
+        selectors: [GLASS_DIALOG_SELECTOR],
+        mode: 'token',
+      }))
+    })
+    return () => {
+      disposed = true
+      for (const off of unregisters) off()
+    }
+  }, 'dsh-zhengl-tj: frosted-glass surfaces')
+
+  const t = ctx.locale.bind(LOCALE_NS)
+
+  // Where the reader came from, for the standalone panel's back control.
+  //
+  // The shell keeps no navigation history — `ctx.layout` writes a selection
+  // and nothing else — so this bundle remembers the previous panel itself.
+  // Subscribing (rather than reading on demand) is what makes the target right
+  // even when the reader takes the long way in: from the Plugins page's bundle
+  // detail, or from another panel entirely.
+  let previousPanelId: string | null = null
+  let lastPanelId = ctx.layout.panelInfo.getSnapshot().activePanelId
+  ctx.effect(() => ctx.layout.panelInfo.subscribe(() => {
+    const next = ctx.layout.panelInfo.getSnapshot().activePanelId
+    if (next === PANEL_ID && lastPanelId !== PANEL_ID) previousPanelId = lastPanelId
+    lastPanelId = next
+  }), 'dsh-zhengl-tj: panel history')
+
+  // Go back to the remembered panel, or to the Conversation.
+  //
+  // A remembered key may have been unregistered since, and `selectPanel` throws
+  // on an unknown key — a throw here would strand the reader on this panel
+  // behind a control that does nothing. `null` is always a legal selection, so
+  // falling back to it keeps the control total.
+  const goBack = (): void => {
+    if (previousPanelId === null || previousPanelId === PANEL_ID) {
+      ctx.layout.selectPanel(null)
+      return
+    }
+    try {
+      ctx.layout.selectPanel(previousPanelId)
+    } catch {
+      ctx.layout.selectPanel(null)
+    }
+  }
+
+  // The panel on the Plugins page: the page declares this keyed slot and
+  // renders the entry on the page of the bundle whose package name equals the
+  // key. The registration lives as long as this bundle's row stays enabled.
+  ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
+    name: 'plugins.bundle.config',
+    key: BUNDLE_NAME,
+    locale: LOCALE_NS,
+  }, UsageStatsSection))
+
+  // The panel as a global main panel: it belongs to the profile, not to a
+  // Session, and the sidebar row below addresses it by this key.
+  ctx.slots.inject('main', () => ctx.slots.register({
+    name: 'main',
+    key: PANEL_ID,
+    locale: LOCALE_NS,
+    inject: () => ({ goBack }),
+  }, UsageStatsPanelPage))
+
+  // The sidebar row, under New Session beside the shipped global panels. A
+  // panel row rather than a footer action: the footer seat is one shared flex
+  // row where this entry would compete for width with every other plugin's.
+  ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
+    name: 'sidebar.panellist',
+    id: PANEL_ID,
+    order: PANEL_ORDER,
+    label: () => t('nav'),
+    locale: LOCALE_NS,
+  }, StatsPanelIcon))
+
+  // The bottom-bar takeover: shadow the official stats pills (same id, lower
+  // priority — the slot's lowest live entry renders) so the pills match the
+  // official ones while every toggle is off and gain this plugin's readouts
+  // when they are on. Disposal restores the official entries.
+  //
+  // WHICH ids to shadow depends on the host line: DSH 0.2.1-alpha.1 split the
+  // single 'stats' entry into 'activity' (counts/speed/time) and 'usage'
+  // (tokens/cache hit) — its release notes say so outright ("输入区统计扩展拆为
+  // activity 和 usage 两个独立入口；覆盖旧 stats 整行的插件需要更新注册 ID").
+  // Registering the wrong shape is worse than registering nothing: 'stats' on a
+  // split host matches no cell, so it renders as a THIRD entry beside the
+  // official two (the duplicated row of issue #10), and the split ids on a
+  // pre-split host also match no cell, adding two pills beside the official
+  // row. So the shape is READ from the dock's own entry ledger instead of
+  // assumed — the same runtime-probe convention the row already applies to its
+  // container.
+  //
+  // A host whose ui-chat registers after this plugin shows an empty ledger at
+  // inject time. That case stays UNDECIDED rather than guessed (either guess is
+  // the wrong contract for the other line) and the subscription resolves it on
+  // the first change that publishes either shape; a dock that never publishes
+  // one keeps no takeover, which is the harmless direction.
+  ctx.slots.inject(COMPOSER_DOCK, () => {
+    const dockIds = (): Set<string> => new Set(
+      ctx.slots.entries(COMPOSER_DOCK)
+        .map((entry) => entry.options.id)
+        .filter((id): id is string => id !== undefined),
+    )
+    let decided = false
+    let installed: (() => void) | null = null
+    const decide = (): void => {
+      if (decided) return
+      const ids = dockIds()
+      const split = ids.has('activity') || ids.has('usage')
+      if (!split && !ids.has('stats')) return
+      // Latched BEFORE registering: a host whose subscription fires
+      // synchronously must not re-enter the decision through our own mutation.
+      decided = true
+      installed = split ? installSplitDockEntries(ctx) : installStatsRowEntry(ctx)
+    }
+    const unsubscribe = ctx.slots.subscribe(COMPOSER_DOCK, decide)
+    decide()
+    return () => {
+      unsubscribe()
+      installed?.()
+    }
+  })
+}

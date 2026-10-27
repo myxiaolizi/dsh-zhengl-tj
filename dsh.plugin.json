@@ -1,0 +1,16 @@
+{
+  "id": "dsh-external/dsh-zhengl-tj",
+  "version": "0.4.0",
+  "main": "./lib/index.js",
+  "description": "Usage statistics panel for DSH web: range-following activity heatmap, per-day / per-hour token trend with clickable per-model legend, custom model short names, and unit prices that turn tokens into an estimated spend",
+  "engines": {
+    "dsh": ">=0.1.7-rc.1"
+  },
+  "contributes": {
+    "tools": [],
+    "skills": []
+  },
+  "client": {
+    "main": "./lib/client-registry.js"
+  }
+}

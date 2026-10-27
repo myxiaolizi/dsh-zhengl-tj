@@ -1,0 +1,134 @@
+/**
+ * Formatting helper tests — a TS translation of reasonix's
+ * usage-stats-format.test.ts plus the pure chart helpers.
+ */
+import { describe, expect, it } from 'vitest'
+import {
+  bucketAxisLabel,
+  bucketTitle,
+  cacheRate,
+  cacheRateText,
+  daysBetween,
+  formatCompact,
+  formatPercent,
+  formatTokens,
+  indexOfDay,
+  niceTicks,
+  providerOf,
+  shortDay,
+  smoothPath,
+} from '../src/client/format.ts'
+
+describe('formatTokens', () => {
+  it('shows exact counts with thousands separators', () => {
+    expect(formatTokens(999)).toBe('999')
+    expect(formatTokens(15000)).toBe('15,000')
+    expect(formatTokens(1234)).toBe('1,234')
+    expect(formatTokens(1500000)).toBe('1,500,000')
+    expect(formatTokens(200000000)).toBe('200,000,000')
+    expect(formatTokens(2500000000)).toBe('2,500,000,000')
+  })
+})
+
+describe('formatCompact', () => {
+  it('uses K/M/B suffixes', () => {
+    expect(formatCompact(1200)).toBe('1.2K')
+    expect(formatCompact(1500000)).toBe('1.5M')
+    expect(formatCompact(2500000000)).toBe('2.5B')
+  })
+})
+
+describe('formatPercent', () => {
+  it('rounds to one decimal, always showing the decimal', () => {
+    // reasonix behavior: (Math.round(p*10)/10).toFixed(1) keeps the ".0".
+    expect(formatPercent(42.55)).toBe('42.6%')
+    expect(formatPercent(100)).toBe('100.0%')
+  })
+})
+
+describe('cacheRate', () => {
+  it('computes the input-side hit ratio', () => {
+    expect(cacheRate(75, 25)).toBeCloseTo(75, 5)
+  })
+  it('returns null for 0/0', () => {
+    expect(cacheRate(0, 0)).toBeNull()
+  })
+  it('handles a 100% hit day', () => {
+    expect(cacheRate(40, 0)).toBe(100)
+  })
+})
+
+describe('cacheRateText', () => {
+  it('renders the ratio (with the .0) or an em dash', () => {
+    expect(cacheRateText(75, 25)).toBe('75.0%')
+    expect(cacheRateText(0, 0)).toBe('—')
+  })
+})
+
+describe('daysBetween', () => {
+  it('lists inclusive local days without UTC shift', () => {
+    expect(daysBetween('2026-08-01', '2026-08-03')).toEqual(['2026-08-01', '2026-08-02', '2026-08-03'])
+  })
+})
+
+describe('indexOfDay', () => {
+  it('maps Monday to 0 and Sunday to 6', () => {
+    expect(indexOfDay('2026-08-03')).toBe(0) // Monday
+    expect(indexOfDay('2026-08-09')).toBe(6) // Sunday
+  })
+})
+
+describe('shortDay', () => {
+  it('formats as M/D', () => {
+    expect(shortDay('2026-08-02')).toBe('8/2')
+  })
+})
+
+describe('providerOf', () => {
+  it('splits a ref and defaults a bare name', () => {
+    expect(providerOf('deepseek/deepseek-chat')).toBe('deepseek')
+    expect(providerOf('deepseek-chat')).toBe('default')
+  })
+})
+
+describe('niceTicks', () => {
+  it('produces 1/2/5-step ticks from the reasonix algorithm', () => {
+    // reasonix: raw=max/count; mag=10^floor(log10(raw)); norm=raw/mag;
+    // step = (1|2|5|10)*mag. For 100/4: raw=25, mag=10, norm=2.5 → step=50.
+    expect(niceTicks(100, 4)).toEqual([50, 100])
+    expect(niceTicks(1000, 4)).toEqual([500, 1000])
+  })
+  it('handles a tiny max', () => {
+    expect(niceTicks(3, 4)).toEqual([1, 2, 3])
+  })
+})
+
+describe('smoothPath', () => {
+  it('returns empty for no points and a move for one', () => {
+    expect(smoothPath([])).toBe('')
+    expect(smoothPath([{ x: 1, y: 2 }])).toBe('M 1 2')
+  })
+  it('builds a Catmull-Rom bezier path for multiple points', () => {
+    const d = smoothPath([{ x: 0, y: 0 }, { x: 10, y: 10 }, { x: 20, y: 0 }])
+    expect(d.startsWith('M 0 0')).toBe(true)
+    expect(d).toContain('C ')
+  })
+})
+
+describe('bucketAxisLabel', () => {
+  it('keeps the short date in day mode', () => {
+    expect(bucketAxisLabel('2026-10-19', 'day')).toBe('10/19')
+  })
+  it('names the day at 00:00 and the hour elsewhere', () => {
+    expect(bucketAxisLabel('2026-10-19T00', 'hour')).toBe('10/19')
+    expect(bucketAxisLabel('2026-10-19T07', 'hour')).toBe('07:00')
+    expect(bucketAxisLabel('2026-10-19T23', 'hour')).toBe('23:00')
+  })
+})
+
+describe('bucketTitle', () => {
+  it('adds the hour to the tooltip title only in hour mode', () => {
+    expect(bucketTitle('2026-10-19', 'day')).toBe('2026-10-19')
+    expect(bucketTitle('2026-10-19T07', 'hour')).toBe('2026-10-19 07:00')
+  })
+})

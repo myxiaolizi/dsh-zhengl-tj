@@ -1,0 +1,195 @@
+/* Session stats pills under the composer (shadow of the official StatsPills):
+   a gauge pill (counts + output speed, click opens the time dialog) and a
+   database pill (total tokens + cache hit, click opens the usage dialog).
+   Replicated from the official StatsPills.module.css + stat-dialog.module.css
+   (13/20 tertiary tier, hover-pill affordance, shared dialog skin).
+
+   Host contract: the row serves two containers at once, and picks between them
+   at attach time — the component marks which one it landed in (see
+   StatsLineEnhanced's `markDockContainer`):
+   - through 0.1.6-alpha.1 the dock slot renders straight into InputBar's own
+     column, and this row owns the content-width clamp, its side gutters and
+     its 4px top pad — the official StatsPills.module.css of that line;
+   - 0.1.6-alpha.2 renders it inside InputBar's flex `.dock` beside the resident
+     ContextMeter, which took all three jobs over, so the row only has to
+     shrink inside it (the official stylesheet's current form).
+   Both forms are kept side by side because one published build has to render
+   correctly on either host line. */
+
+.root {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  box-sizing: border-box;
+  /* <= 0.1.6-alpha.1: this row is the composer column's content-width box. */
+  width: 100%;
+  max-width: var(--dsh-chat-content-width);
+  margin: 0 auto;
+  padding: 4px calc(var(--dsh-composer-side-clearance) + 16px) 0px;
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  line-height: calc(20px + var(--dsh-content-font-delta-secondary, 0px));
+}
+
+/* 0.1.6-alpha.2+: InputBar's `.dock` owns the centring, the 12px gap, the top
+   pad and the side clearance. */
+.root[data-dock-row] {
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+/* Dialog anchor: shrink-wraps its pill so the panel clamp measures the pill. */
+.anchor {
+  display: inline-flex;
+  min-width: 0;
+}
+
+/* Split-mode anchor (DSH >= 0.2.1-alpha.1). The host split the single `stats`
+   dock entry into one entry per pill and let its own `.dock` flex row own the
+   layout, so the anchor IS the entry root and carries the text tier `.root`
+   used to set — the official StatsPills.module.css moved exactly this pair of
+   declarations from `.root` onto `.anchor`. The tier stays off the plain
+   `.anchor` because the pre-split row must keep its own `.root` tier. */
+.dockAnchor {
+  font-size: calc(var(--dsh-content-font-size-secondary, 13px) - 1px);
+  line-height: calc(20px + var(--dsh-content-font-delta-secondary, 0px));
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  max-width: 100%;
+  padding: 1px 8px;
+  border: none;
+  border-radius: 24px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  line-height: inherit;
+  white-space: nowrap;
+}
+
+.pill svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+/* Only the button form (a pill with dialog rows to open) invites interaction;
+   the static span form keeps the resting tertiary reading. */
+button.pill {
+  cursor: pointer;
+}
+
+button.pill:hover,
+button.pill[aria-expanded='true'] {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-secondary);
+}
+
+.label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sep {
+  color: var(--dsw-alias-separator-primary);
+  margin: 0 6px;
+}
+
+/* Reserved slot for the speed figure: the official pill's figure only changes
+   when a step settles, but the live reading refreshes on every beat. A width
+   that tracked the digits would reflow the centred row on each of them and drag
+   the counts pill beside it along; 10ch covers "1200 tok/s", the widest shape
+   formatTokensPerSecond can produce. */
+.speed {
+  display: inline-block;
+  min-width: 10ch;
+}
+
+/* Portal dialog surface: fixed in the viewport, left/top supplied inline from
+   the anchored-position clamp (12px viewport margin, layers above overlays).
+   Material = the official stat-dialog PAIRING, which dsh 0.1.7's menu
+   redesign made mandatory: `--dsw-specific-menu` is translucent there
+   (rgba 58%/45%), so the blur token must ride along — the 0.1.5-era recipe
+   this file copied was a single opaque line, and a fill-only copy reads as
+   bare transparency over the page (issue #6). */
+.dialogPanel {
+  position: fixed;
+  z-index: 1100;
+  box-sizing: border-box;
+  width: max-content;
+  min-width: min(300px, calc(100vw - 24px));
+  max-width: min(440px, calc(100vw - 24px));
+  padding: 16px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--dsw-specific-menu);
+  backdrop-filter: var(--dsw-menu-backdrop-filter);
+  --dsw-elevation-stroke-color: var(--dsw-alias-border-l1);
+  box-shadow: var(--dsw-elevation-prominent);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+  cursor: default;
+}
+
+/* Dialog heading row: the section name left, the headline value right. */
+.dialogTitle {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 8px;
+  color: var(--dsw-alias-label-primary);
+  font-weight: 500;
+}
+
+/* Rule under the heading, above its rows. */
+.dialogTitleRule {
+  margin-bottom: 10px;
+  border-top: 0.5px solid var(--dsw-alias-border-l2);
+}
+
+.dialogTitleValue {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Heading glyph seated left of the section name. */
+.dialogTitleLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.dialogTitleLabel svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+.dialogDetails {
+  display: grid;
+  grid-template-columns: minmax(76px, auto) minmax(0, 1fr);
+  gap: 6px 16px;
+  margin: 0;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.dialogDetails dt,
+.dialogDetails dd {
+  min-width: 0;
+  margin: 0;
+}
+
+.dialogDetails dd {
+  color: var(--dsw-alias-label-secondary);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}

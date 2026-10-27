@@ -1,0 +1,812 @@
+/**
+ * Tests for StatsLineEnhanced (the shadowing composer.dock entry): with every
+ * toggle off the row matches the official StatsPills output - a gauge pill
+ * (counts + speed, click opens the time dialog) and a database pill (total +
+ * cache hit, click opens the usage dialog). With a toggle on, the cache hit
+ * rate gains two decimals, the usage dialog gains the miss row, and the gauge
+ * pill's speed figure becomes the live streaming estimate until the step
+ * settles. The component is fed by the same projection seats as the official
+ * one (tokenUsage / sessionStats), so the tests stub them the way the official
+ * suite does. Dialogs portal into document.body; the two pills share one
+ * exclusive open slot.
+ */
+// @vitest-environment jsdom
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { useSyncExternalStore } from 'react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import type {
+  AssistantMessageNodeLike, ToolResultNodeLike,
+} from '../src/client/stats-line-core.ts'
+import { StatsActivityEntry, StatsLineEnhanced, StatsUsageEntry, type StatsLineEnhancedProps } from '../src/client/StatsLineEnhanced.tsx'
+import { zh } from '../src/client/locales.ts'
+import { resetStatsLineStateForTests, statsLineState } from '../src/client/stats-line-state.ts'
+
+/** The plugin's zh dictionary through a minimal template translator. */
+const t = ((key: string, params?: Record<string, string | number>) => {
+  const template = (zh as Record<string, string>)[key] ?? key
+  return Object.entries(params ?? {}).reduce(
+    (text, [k, v]) => text.replaceAll('{' + k + '}', String(v)),
+    template,
+  )
+}) as unknown as StatsLineEnhancedProps['t']
+
+beforeEach(() => {
+  window.localStorage.clear()
+  resetStatsLineStateForTests()
+})
+
+afterEach(() => {
+  cleanup()
+})
+
+const assistant = (seq: number, turn: number, usage?: unknown): AssistantMessageNodeLike => ({
+  kind: 'assistant', seq, time: seq * 1_000, turn, step: seq, blocks: [{ kind: 'text', text: 't' + seq }],
+  ...(usage === undefined ? {} : { usage }),
+})
+
+const tool = (): ToolResultNodeLike => ({
+  kind: 'tool-result', seq: 5, time: 5_000, callId: 'c', call: null, callTime: null, content: [],
+  isError: false, callView: null, resultView: null, subCalls: [],
+})
+
+/** Minimal chat-snapshot stub: the component reads s.legacy.nodes and, for the
+ *  live speed estimate, s.legacy.partial. */
+function makeSource(nodes: readonly unknown[] = [], partial: unknown = null): {
+  source: { getSnapshot(): unknown; subscribe(fn: () => void): () => void }
+} {
+  const snap = { legacy: { nodes, partial } }
+  return {
+    source: {
+      getSnapshot: () => snap,
+      subscribe: () => () => {},
+    },
+  }
+}
+
+/** The projection seat: a key-addressed table of whole values. */
+function projections(values: Record<string, unknown>): StatsLineEnhancedProps['useProjection'] {
+  return ((key: string) => values[key]) as unknown as StatsLineEnhancedProps['useProjection']
+}
+
+function props(
+  source: { getSnapshot(): unknown; subscribe(fn: () => void): () => void },
+  values: Record<string, unknown> = { tokenUsage: USAGE },
+): StatsLineEnhancedProps {
+  return {
+    useChat: ((selector: (s: unknown) => unknown) => selector(source.getSnapshot())) as StatsLineEnhancedProps['useChat'],
+    useProjection: projections(values),
+    t,
+  }
+}
+
+/**
+ * A store-shaped chat seat: it subscribes the way the real one does, so a test
+ * can both replay a chunk frame that swaps only `partial` (the object-layer
+ * contract the official suite asserts) and grow a step's output the way a live
+ * one actually grows. The plain `makeSource` stub above cannot do either — it
+ * never notifies, so only an explicit re-render would be seen.
+ */
+function liveSeat(nodes: readonly unknown[], initial: unknown = null): {
+  useChat: StatsLineEnhancedProps['useChat']
+  set(partial: unknown): void
+} {
+  const box = { partial: initial }
+  const listeners = new Set<() => void>()
+  return {
+    useChat: ((selector: (s: unknown) => unknown) => useSyncExternalStore(
+      (notify: () => void) => { listeners.add(notify); return () => { listeners.delete(notify) } },
+      () => selector({ legacy: { nodes, partial: box.partial } }),
+    )) as StatsLineEnhancedProps['useChat'],
+    set(partial: unknown): void {
+      box.partial = partial
+      for (const notify of [...listeners]) notify()
+    },
+  }
+}
+
+const USAGE = { uncachedInputTokens: 10, outputTokens: 5, cacheReadTokens: 90, cacheWriteTokens: 0 }
+
+function sessionStats(overrides: Record<string, number>): Record<string, number> {
+  return {
+    turns: 0, steps: 0, llmMs: 0, toolMs: 0, ttftMs: 0, ttftSteps: 0, decodeMs: 0, decodeTokens: 0,
+    ...overrides,
+  }
+}
+
+describe('StatsLineEnhanced pills', () => {
+  it('renders gauge and database pills with both toggles off', () => {
+    const { source } = makeSource([assistant(1, 1), tool()])
+    const view = render(<StatsLineEnhanced {...props(source)} />)
+    expect(view.container.querySelector('[data-composer-stats]')).not.toBeNull()
+    // No timed figures: the gauge pill is a static reading, the usage pill a button.
+    expect(screen.getByText('1 轮 · 1 步')).toBeTruthy()
+    expect(screen.getAllByRole('button')).toHaveLength(1)
+    expect(screen.getByRole('button', { name: '105 tok · 缓存命中 90%' })).toBeTruthy()
+  })
+
+  it('renders nothing for a brand-new empty session', () => {
+    const { source } = makeSource()
+    const view = render(<StatsLineEnhanced {...props(source, {
+      tokenUsage: { uncachedInputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    })} />)
+    expect(view.container.textContent).toBe('')
+  })
+
+  it('keeps durable pills after the visible step window is empty', () => {
+    const { source } = makeSource()
+    const view = render(<StatsLineEnhanced {...props(source, {
+      tokenUsage: USAGE,
+      sessionStats: sessionStats({ turns: 7, steps: 44 }),
+    })} />)
+    expect(view.container.querySelector('[data-composer-stats]')).not.toBeNull()
+    expect(screen.getByText('7 轮 · 44 步')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '105 tok · 缓存命中 90%' })).toBeTruthy()
+  })
+
+  it('drops the usage pill when no projection is composed', () => {
+    const { source } = makeSource([assistant(1, 1)])
+    render(<StatsLineEnhanced {...props(source, {})} />)
+    expect(screen.getByText('1 轮 · 1 步')).toBeTruthy()
+    expect(screen.queryByRole('button')).toBeNull()
+  })
+
+  it('hides the usage pill when steps closed without any billed activity', () => {
+    const { source } = makeSource()
+    render(<StatsLineEnhanced {...props(source, {
+      tokenUsage: { uncachedInputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      sessionStats: sessionStats({ turns: 1, steps: 1 }),
+    })} />)
+    expect(screen.getByText('1 轮 · 1 步')).toBeTruthy()
+    expect(screen.queryByRole('button')).toBeNull()
+  })
+
+  it('opens the time dialog with timed rows on click', () => {
+    const { source } = makeSource()
+    render(<StatsLineEnhanced {...props(source, {
+      sessionStats: sessionStats({ turns: 1, steps: 1, llmMs: 1100, toolMs: 2000, ttftMs: 100, ttftSteps: 1, decodeMs: 1000, decodeTokens: 22 }),
+    })} />)
+    fireEvent.click(screen.getByRole('button', { name: '1 轮 · 1 步 · 22 tok/s' }))
+    const dialog = screen.getByRole('dialog')
+    expect(dialog.textContent).toContain('用时与速度')
+    expect(dialog.textContent).toContain('LLM 用时')
+    expect(dialog.textContent).toContain('1.1s')
+    expect(dialog.textContent).toContain('工具用时')
+    expect(dialog.textContent).toContain('2s')
+    expect(dialog.textContent).toContain('首 token 平均')
+    expect(dialog.textContent).toContain('0.1s')
+    expect(dialog.textContent).toContain('解码速度')
+    expect(dialog.textContent).toContain('22 tok/s')
+  })
+
+  it('keeps the two dialogs mutually exclusive', () => {
+    const { source } = makeSource()
+    render(<StatsLineEnhanced {...props(source, {
+      tokenUsage: USAGE,
+      sessionStats: sessionStats({ turns: 1, steps: 1, llmMs: 1100 }),
+    })} />)
+    fireEvent.click(screen.getByRole('button', { name: '1 轮 · 1 步' }))
+    expect(screen.getByRole('dialog').textContent).toContain('用时与速度')
+    fireEvent.click(screen.getByRole('button', { name: '105 tok · 缓存命中 90%' }))
+    const dialog = screen.getByRole('dialog')
+    expect(dialog.textContent).toContain('Token 用量')
+    expect(dialog.textContent).not.toContain('用时与速度')
+  })
+
+  it('shows the precise rate and the miss row with both toggles on', () => {
+    statsLineState.setCachePrecision(true)
+    statsLineState.setTokenDetail(true)
+    const { source } = makeSource([assistant(1, 1)])
+    render(<StatsLineEnhanced {...props(source, {
+      tokenUsage: { uncachedInputTokens: 59, outputTokens: 5, cacheReadTokens: 341, cacheWriteTokens: 0 },
+    })} />)
+    fireEvent.click(screen.getByRole('button', { name: '405 tok · 缓存命中 85.25%' }))
+    const dialog = screen.getByRole('dialog')
+    expect(dialog.textContent).toContain('85.25%')
+    expect(dialog.textContent).toContain('未命中缓存')
+    expect(dialog.textContent).toContain('59 tok')
+    expect(dialog.textContent).toContain('405 tok')
+  })
+
+  it('closes the open dialog on Escape', () => {
+    const { source } = makeSource([assistant(1, 1)])
+    render(<StatsLineEnhanced {...props(source, { tokenUsage: USAGE })} />)
+    fireEvent.click(screen.getByRole('button', { name: '105 tok · 缓存命中 90%' }))
+    expect(screen.getByRole('dialog')).toBeTruthy()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+});
+
+/**
+ * The live-speed arm evaluates its quotient at render time off Date.now(), so
+ * these cases run on fake timers: advancing the clock and then delivering a
+ * delta is what produces a reading. A step's window opens when its output first
+ * becomes observable, and the first reading lands on the first delta after the
+ * 500ms floor — the deltas drive the figure, the 1s beat only covers a step
+ * that has gone quiet.
+ *
+ * Fixtures hand over the text a steady stream would have produced BY each mark —
+ * 100 hanzi/s, i.e. 60 tokens/s at the published density — rather than the whole
+ * answer at once. A whole-answer fixture reads high on a short window, which is
+ * the burst the floor exists to reject, not the shape a live step has.
+ *
+ * The official figure in every case is 20 tok/s (20 tokens over 1s of decode
+ * wall time), so any other number on screen is the estimate.
+ */
+describe('StatsLineEnhanced streaming throughput', () => {
+  /** Hanzi a steady step has produced `ms` into its window (100/s). */
+  const charsBy = (ms: number): number => Math.round(ms / 10)
+  /** That output as one text block, pinned to a turn:step. */
+  const partialWith = (hanzi: number, turn = 1, step = 1): unknown =>
+    ({ turn, step, blocks: [{ kind: 'text', text: '中'.repeat(hanzi) }] })
+  const OFFICIAL = '1 轮 · 1 步 · 20 tok/s'
+  /** The throughput figure the pill is showing, in tok/s. */
+  const shownRate = (pill: HTMLElement): number => {
+    const match = /([\d.]+) tok\/s/.exec(pill.textContent ?? '')
+    if (match === null) throw new Error(`no rate in "${pill.textContent ?? ''}"`)
+    return Number(match[1])
+  }
+  const pills = { tokenUsage: USAGE, sessionStats: sessionStats({ turns: 1, steps: 1, decodeMs: 1_000, decodeTokens: 20 }) }
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  /** Render with the live reading on or off; returns the seat and the gauge pill. */
+  function mount(initial: unknown, live = true, nodes: readonly unknown[] = [assistant(1, 1)]): {
+    seat: ReturnType<typeof liveSeat>
+    pill: HTMLElement
+  } {
+    statsLineState.setStreamThroughput(live)
+    const seat = liveSeat(nodes, initial)
+    render(<StatsLineEnhanced useChat={seat.useChat} useProjection={projections(pills)} t={t} />)
+    return { seat, pill: screen.getByRole('button', { name: OFFICIAL }) }
+  }
+
+  it('publishes the first reading on the first delta past the window', () => {
+    const { seat, pill } = mount(partialWith(0))
+    // 100ms in: a delta arrives, but the window is not yet trustworthy.
+    act(() => { seat.set(partialWith(charsBy(100))) })
+    expect(pill.textContent).toContain('20 tok/s')
+    // 500ms in: the next delta lands with the window open, and the figure
+    // appears on that very frame — no beat, no extra period of dead time.
+    act(() => { vi.advanceTimersByTime(500) })
+    act(() => { seat.set(partialWith(charsBy(500))) })
+    expect(pill.textContent).toContain('60 tok/s')
+  })
+
+  it('holds a steady reading while the stream stays steady', () => {
+    const { seat, pill } = mount(partialWith(0))
+    // 30 tokens over 0.5s, 90 over 1.5s, 150 over 2.5s — one constant rate.
+    act(() => { vi.advanceTimersByTime(500) })
+    act(() => { seat.set(partialWith(charsBy(500))) })
+    expect(pill.textContent).toContain('60 tok/s')
+    act(() => { vi.advanceTimersByTime(1_000) })
+    act(() => { seat.set(partialWith(charsBy(1_500))) })
+    expect(pill.textContent).toContain('60 tok/s')
+    act(() => { vi.advanceTimersByTime(1_000) })
+    act(() => { seat.set(partialWith(charsBy(2_500))) })
+    expect(pill.textContent).toContain('60 tok/s')
+  })
+
+  it('updates on every delta without the stale-denominator sawtooth', () => {
+    // The failure this guards: evaluating the quotient against a stored
+    // "refreshed at" timestamp, which pairs a fresh numerator with the previous
+    // beat's clock — the figure climbs between refreshes and snaps back. Reading
+    // the clock at render time keeps both terms on the same instant, so a steady
+    // stream keeps reporting its rate however often a delta lands.
+    const { seat, pill } = mount(partialWith(0))
+    act(() => { vi.advanceTimersByTime(500) })
+    act(() => { seat.set(partialWith(charsBy(500))) })
+    expect(pill.textContent).toContain('60 tok/s')
+    // Mid-second deltas: 60 tokens at t=1.0s, then 90 at t=1.5s.
+    act(() => { vi.advanceTimersByTime(500) })
+    act(() => { seat.set(partialWith(charsBy(1_000))) })
+    expect(pill.textContent).toContain('60 tok/s')
+    act(() => { vi.advanceTimersByTime(500) })
+    act(() => { seat.set(partialWith(charsBy(1_500))) })
+    expect(pill.textContent).toContain('60 tok/s')
+  })
+
+  it('leaves the official figure in place when the preference is off', () => {
+    const { seat, pill } = mount(partialWith(0), false)
+    act(() => { seat.set(partialWith(charsBy(3_000))) })
+    act(() => { vi.advanceTimersByTime(3_000) })
+    expect(pill.textContent).toContain('20 tok/s')
+    expect(pill.textContent).not.toContain('60 tok/s')
+  })
+
+  it('renders the figure in a width-reserved slot the row cannot reflow on', () => {
+    // The row is centred, so a figure whose width tracked its digits would
+    // re-centre both pills on every refresh — the counts pill would visibly
+    // drift along with the speed reading. The slot's width is held by
+    // css.speed; this asserts the figure still renders INTO that slot.
+    const { seat, pill } = mount(partialWith(0))
+    const figure = (): string | null | undefined => pill.querySelector('[data-stats-speed]')?.textContent
+    expect(figure()).toBe('20 tok/s')
+    act(() => { vi.advanceTimersByTime(500) })
+    act(() => { seat.set(partialWith(charsBy(500))) })
+    expect(figure()).toBe('60 tok/s')
+    // A jump from two digits to three stays inside the same element, so the
+    // slot's reserved width — not the digits — is what the row lays out.
+    act(() => { vi.advanceTimersByTime(1_000) })
+    act(() => { seat.set(partialWith(charsBy(1_500) * 3)) })
+    expect(figure()).toBe('180 tok/s')
+    expect(pill.querySelectorAll('[data-stats-speed]')).toHaveLength(1)
+  })
+
+  it('hands the reading back to the official figure the moment the step settles', () => {
+    const { seat, pill } = mount(partialWith(0))
+    act(() => { vi.advanceTimersByTime(500) })
+    act(() => { seat.set(partialWith(charsBy(500))) })
+    expect(pill.textContent).toContain('60 tok/s')
+
+    // The step settles: the frame itself drops the pill back, without waiting
+    // for a beat.
+    act(() => { seat.set(null) })
+    expect(pill.textContent).toContain('20 tok/s')
+    expect(pill.textContent).not.toContain('60 tok/s')
+  })
+
+  it('counts reasoning and tool-call arguments alongside the visible answer', () => {
+    // 20 + 20 hanzi (12 + 12) plus 20 ASCII argument chars (6) = 30 tokens, the
+    // same total a 500ms slice of the steady stream carries.
+    const { seat, pill } = mount(partialWith(0))
+    act(() => { vi.advanceTimersByTime(500) })
+    act(() => {
+      seat.set({
+        turn: 1,
+        step: 1,
+        blocks: [
+          { kind: 'text', text: '中'.repeat(20) },
+          { kind: 'reasoning', text: '中'.repeat(20) },
+          { kind: 'tool-call', callId: 'c', name: 'read', argsRaw: 'a'.repeat(20) },
+        ],
+      })
+    })
+    expect(pill.textContent).toContain('60 tok/s')
+  })
+
+  it('calibrates the estimate against the session own settled steps', () => {
+    // A settled step of 200 hanzi reported 180 output tokens: 180 / 120 prior
+    // = ×1.5, so the same density on the live step prices 30 → 45 over 0.5s.
+    const settled: AssistantMessageNodeLike = {
+      ...assistant(1, 1, { outputTokens: 180 }),
+      blocks: [{ kind: 'text', text: '中'.repeat(200) }],
+    }
+    const { seat, pill } = mount(partialWith(0), true, [settled])
+    act(() => { vi.advanceTimersByTime(500) })
+    act(() => { seat.set(partialWith(charsBy(500))) })
+    expect(pill.textContent).toContain('90 tok/s')
+  })
+
+  it('keeps the reading through a mid-step collapse instead of jumping to the average', () => {
+    // Block boundaries replace accumulated text wholesale (a reasoning block
+    // closes, a retry empties the stream), so the estimate legitimately shrinks
+    // inside one step. A collapse means the counts before it describe text that is
+    // no longer there: the window re-anchors, so the collapse itself never reads as
+    // a rate. The figure stays where it was — the step is still streaming and its
+    // rate did not change — because dropping to the session average here is a jump
+    // the stream cannot account for.
+    const { seat, pill } = mount(partialWith(0))
+    act(() => { vi.advanceTimersByTime(500) })
+    act(() => { seat.set(partialWith(charsBy(500))) })
+    expect(shownRate(pill)).toBe(60)
+
+    // 30 → 3 estimated tokens at t=1.5s: the window restarts, the figure does not.
+    act(() => { vi.advanceTimersByTime(1_000) })
+    act(() => { seat.set(partialWith(5)) })
+    expect(shownRate(pill)).toBe(60)
+
+    // Growth resumes from the re-anchored count: 100 hanzi by t=2.0s is 60 tokens
+    // over the 0.5 s window that opened on the collapse. The elapsed second since
+    // the last publication is this smoothing's whole time constant, so the reading
+    // is adopted as it stands.
+    act(() => { vi.advanceTimersByTime(500) })
+    act(() => { seat.set(partialWith(charsBy(1_000))) })
+    expect(shownRate(pill)).toBe(114)
+
+    // A steady 100 hanzi/s follows, so the window slides past the collapse and the
+    // figure settles back on the stream's own rate rather than on the collapse.
+    act(() => { vi.advanceTimersByTime(500) })
+    act(() => { seat.set(partialWith(charsBy(1_500))) })
+    expect(shownRate(pill)).toBeGreaterThan(85)
+    expect(shownRate(pill)).toBeLessThan(115)
+    act(() => { vi.advanceTimersByTime(1_000) })
+    act(() => { seat.set(partialWith(charsBy(2_500))) })
+    expect(shownRate(pill)).toBeGreaterThan(55)
+    expect(shownRate(pill)).toBeLessThan(80)
+  })
+
+  it('holds the reading while a step goes quiet instead of dropping to the average', () => {
+    // A step can stall mid-answer (the model is thinking, a tool is about to
+    // start). The official figure is the session's whole history, so showing it
+    // here would be a visible jump on a stream that has not changed rate.
+    const { seat, pill } = mount(partialWith(0))
+    act(() => { vi.advanceTimersByTime(500) })
+    act(() => { seat.set(partialWith(charsBy(500))) })
+    expect(shownRate(pill)).toBe(60)
+
+    // Four seconds of frames repeating the same estimate: the row keeps reading 60.
+    for (let beat = 0; beat < 4; beat += 1) {
+      act(() => { vi.advanceTimersByTime(1_000) })
+      act(() => { seat.set(partialWith(charsBy(500))) })
+      expect(shownRate(pill)).toBe(60)
+    }
+
+    // Only the step settling hands the slot back to the official figure.
+    act(() => { seat.set(null) })
+    expect(pill.textContent).toContain('20 tok/s')
+  })
+
+  it('re-anchors the live window when the measured correction moves', () => {
+    // The correction is measured from the session's settled steps, so a step that
+    // settles while another is streaming re-prices the estimate mid-flight. That
+    // jump is not output: without the re-anchor it would publish as a burst.
+    const settled: AssistantMessageNodeLike = {
+      ...assistant(1, 1, { outputTokens: 180 }),
+      blocks: [{ kind: 'text', text: '中'.repeat(200) }],
+    }
+    const { seat, pill } = mount(partialWith(0), true, [settled])
+    // ×1.5 from the settled step above: 50 hanzi is 30 prior tokens → 45.
+    act(() => { vi.advanceTimersByTime(500) })
+    act(() => { seat.set(partialWith(charsBy(500))) })
+    expect(shownRate(pill)).toBe(90)
+  })
+
+  it('lays the speed slot out even when no figure can be shown', () => {
+    // A session whose first step is still streaming has no settled decode time, so
+    // the official fallback is null. The slot must stay in the row anyway: a figure
+    // that vanished and reappeared would reflow the centred pills beside it.
+    const seat = liveSeat([], partialWith(0))
+    statsLineState.setStreamThroughput(true)
+    render(<StatsLineEnhanced
+      useChat={seat.useChat}
+      useProjection={projections({ tokenUsage: USAGE, sessionStats: sessionStats({ turns: 1, steps: 1 }) })}
+      t={t}
+    />)
+    const slot = document.querySelector('[data-stats-speed]')
+    expect(slot).not.toBeNull()
+    expect(slot?.textContent).toBe('')
+    // Nothing measurable yet, and nothing to fall back to: the row still renders.
+    act(() => { vi.advanceTimersByTime(200) })
+    expect(document.querySelector('[data-stats-speed]')).not.toBeNull()
+  })
+
+  it('restarts the window when the stream moves to the next step', () => {
+    const { seat, pill } = mount(partialWith(0, 1, 1))
+    act(() => { vi.advanceTimersByTime(500) })
+    act(() => { seat.set(partialWith(charsBy(500), 1, 1)) })
+    expect(pill.textContent).toContain('60 tok/s')
+
+    // Step 2 opens its own window at t=0.5s: the delta that switches the step
+    // arrives with no measurable window yet, so the official figure returns.
+    act(() => { seat.set(partialWith(0, 1, 2)) })
+    expect(pill.textContent).toContain('20 tok/s')
+    // 1s into that window: 100 hanzi = 60 tokens over 1s, the same rate again.
+    act(() => { vi.advanceTimersByTime(1_000) })
+    act(() => { seat.set(partialWith(charsBy(1_000), 1, 2)) })
+    expect(pill.textContent).toContain('60 tok/s')
+  })
+
+  it('does not publish a rate for text the UI only received in one late frame', () => {
+    // The reported defect. Frames are published on animation frames, so a tab
+    // that was backgrounded (or a busy main thread) hands the row a whole
+    // backlog at once while the stream kept running — 2 500 hanzi here is the
+    // ~19 s of output a 20 s suspension accumulates at 100 hanzi/s. The old
+    // figure divided that backlog by a window that had just opened — thousands
+    // of tok/s — and then decayed for the rest of the step as the denominator
+    // grew. The threshold sits at 3 000 tok/s, above the fastest model in
+    // service, so what the reading must skip is the suspension, not fast output.
+    const { seat, pill } = mount(partialWith(0))
+    act(() => { vi.advanceTimersByTime(20_000) })
+    act(() => { seat.set(partialWith(2_500)) })
+    expect(pill.textContent).toContain('20 tok/s')
+    expect(pill.textContent).not.toContain('2500 tok/s')
+
+    // And it stays out: the reading is the stream's own rate from here on, not
+    // the backlog decaying as the denominator grows.
+    act(() => { vi.advanceTimersByTime(250) })
+    act(() => { seat.set(partialWith(2_525)) })
+    expect(pill.textContent).not.toContain('2500 tok/s')
+
+    // The stream then continues at the steady 100 hanzi/s, delivered the way a
+    // live one is: a frame every 250 ms. The backlog the late frame carried stays
+    // out of the figure — it is what the window is anchored on — so the reading is
+    // the stream's real rate (60 tok/s) instead of decaying across the whole step
+    // the way the cumulative quotient did.
+    for (let step = 1; step <= 12; step += 1) {
+      act(() => { vi.advanceTimersByTime(250) })
+      act(() => { seat.set(partialWith(2_525 + step * 25)) })
+    }
+    expect(pill.textContent).toContain('60 tok/s')
+  })
+
+  it('does not charge a mid-stream attach to the window it opens on', () => {
+    // The reported defect. Switching to a session that is already streaming
+    // mounts the row with the step's whole output in hand: the stream ran while
+    // this row did not exist, so the first frame it ever sees carries the whole
+    // backlog and the clock it can measure with is milliseconds old. The window
+    // that opens on such a frame must treat what it already holds as its
+    // baseline, not as growth of its own.
+    const seat = liveSeat([assistant(1, 1)], partialWith(30_000))
+    statsLineState.setStreamThroughput(true)
+    render(<StatsLineEnhanced useChat={seat.useChat} useProjection={projections(pills)} t={t} />)
+    const pill = screen.getByRole('button', { name: OFFICIAL })
+    // The attach frame carries no watched growth yet: the official session
+    // figure stays on screen and no thousands-per-second reading appears.
+    expect(pill.textContent).toContain('20 tok/s')
+
+    // The window first spans the observation floor two seconds later, with the
+    // stream having added one character since the switch: the reading is that
+    // 0.6 token over 2 s (0.3 tok/s), not 18 001 tokens over the same 2 s.
+    act(() => { vi.advanceTimersByTime(2_000) })
+    act(() => { seat.set(partialWith(30_001)) })
+    expect(pill.textContent).toContain('0.3 tok/s')
+    expect(pill.textContent).not.toContain('9000 tok/s')
+  })
+
+  it('measures the first reading after a switch from that point on', () => {
+    // The attach frame's count is the step's history, so it is the window's
+    // baseline. Without that, the frame the row mounts on hands its whole count
+    // to a window whose clock has only just started: switching to a session that
+    // is already streaming read 18 018 tokens over the first second of watching
+    // — 18 036 tok/s on screen — instead of the stream's own rate.
+    const seat = liveSeat([assistant(1, 1)], partialWith(30_000))
+    statsLineState.setStreamThroughput(true)
+    render(<StatsLineEnhanced useChat={seat.useChat} useProjection={projections(pills)} t={t} />)
+    const pill = screen.getByRole('button', { name: OFFICIAL })
+    act(() => { vi.advanceTimersByTime(1_000) })
+    act(() => { seat.set(partialWith(30_060)) })
+    // Only the 36 tokens observed inside the window count: 36 / 1 s.
+    expect(pill.textContent).toContain('36 tok/s')
+    expect(pill.textContent).not.toContain('18036 tok/s')
+  })
+});
+
+/**
+ * The official StatsPills carries a hard acceptance criterion — "renders ZERO
+ * times during streaming chunk frames" — because its row must stay out of the
+ * per-frame delta path. A shadowing row owes the same property, so these cases
+ * replay real chunk frames against a subscribing seat (a plain selector stub
+ * cannot show a re-render count) and count renders on the row itself.
+ */
+describe('StatsLineEnhanced streaming subscription isolation', () => {
+  const pills = { tokenUsage: USAGE, sessionStats: sessionStats({ turns: 1, steps: 1, decodeMs: 1_000, decodeTokens: 20 }) }
+
+  function countRenders(seat: { useChat: StatsLineEnhancedProps['useChat'] }): () => number {
+    let renders = 0
+    function Counting(p: StatsLineEnhancedProps) {
+      renders += 1
+      return <StatsLineEnhanced {...p} />
+    }
+    render(<Counting useChat={seat.useChat} useProjection={projections(pills)} t={t} />)
+    return () => renders
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('renders zero times per chunk frame while the preference is off', () => {
+    const seat = liveSeat([assistant(1, 1)])
+    const renders = countRenders(seat)
+    const before = renders()
+    act(() => { seat.set({ turn: 1, step: 2, blocks: [{ kind: 'text', text: 'a' }] }) })
+    act(() => { seat.set({ turn: 1, step: 2, blocks: [{ kind: 'text', text: 'ab' }] }) })
+    expect(renders()).toBe(before)
+  })
+
+  it('keeps the pills out of the delta path while the reading is live', () => {
+    statsLineState.setStreamThroughput(true)
+    // A step already open — its window anchored at mount — so the frame below is
+    // an ordinary delta rather than the one that starts the step.
+    const seat = liveSeat([assistant(1, 1)], { turn: 1, step: 1, blocks: [] })
+    const renders = countRenders(seat)
+    const before = renders()
+    // The same frames that must not touch the row do drive the reading.
+    act(() => { vi.advanceTimersByTime(500) })
+    act(() => { seat.set({ turn: 1, step: 1, blocks: [{ kind: 'text', text: '中'.repeat(50) }] }) })
+    expect(renders()).toBe(before)
+    expect(screen.getByRole('button', { name: '1 轮 · 1 步 · 20 tok/s' }).textContent).toContain('60 tok/s')
+  })
+});
+
+/**
+ * The row's host-container contract: one build serves two InputBar layouts, so
+ * the row marks which container it landed in at attach time and the stylesheet
+ * keys off that marker. Through 0.1.6-alpha.1 the slot renders straight into
+ * InputBar's own column and the row owns its content-width clamp, side gutters
+ * and 4px top pad; from 0.1.6-alpha.2 the row sits in InputBar's flex `.dock`
+ * beside the resident ContextMeter, which took all three over (the official
+ * StatsPills.module.css dropped the same declarations). The two container
+ * shapes are exactly what <InputBar> builds either side of that change.
+ */
+describe('StatsLineEnhanced host container contract', () => {
+  const rowOf = (view: ReturnType<typeof render>): HTMLElement => {
+    const row = view.container.querySelector('[data-composer-stats]')
+    expect(row).not.toBeNull()
+    return row as HTMLElement
+  }
+
+  it('marks the row when the host renders it inside the flex dock row (0.1.6-alpha.2+)', () => {
+    const { source } = makeSource([assistant(1, 1), tool()])
+    const view = render(
+      <div style={{ display: 'flex', flexDirection: 'row' }}>
+        <StatsLineEnhanced {...props(source)} />
+      </div>,
+    )
+    expect(rowOf(view).hasAttribute('data-dock-row')).toBe(true)
+  })
+
+  it('leaves the row unmarked on the composer column (<= 0.1.6-alpha.1)', () => {
+    const { source } = makeSource([assistant(1, 1), tool()])
+    const view = render(
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
+        <StatsLineEnhanced {...props(source)} />
+      </div>,
+    )
+    expect(rowOf(view).hasAttribute('data-dock-row')).toBe(false)
+  })
+
+  it('leaves the row unmarked on a plain block container (no InputBar column styles)', () => {
+    const { source } = makeSource([assistant(1, 1), tool()])
+    const view = render(<StatsLineEnhanced {...props(source)} />)
+    expect(rowOf(view).hasAttribute('data-dock-row')).toBe(false)
+  })
+
+  it('probes past the slot renderer display:contents wrapper (live 0.1.6-alpha.2 DOM)', () => {
+    const { source } = makeSource([assistant(1, 1), tool()])
+    const view = render(
+      <div style={{ display: 'flex', flexDirection: 'row' }}>
+        <div style={{ display: 'contents' }}>
+          <StatsLineEnhanced {...props(source)} />
+        </div>
+      </div>,
+    )
+    expect(rowOf(view).hasAttribute('data-dock-row')).toBe(true)
+  })
+
+  it('stays unmarked when every ancestor only wraps without a box', () => {
+    const { source } = makeSource([assistant(1, 1), tool()])
+    const view = render(
+      <div style={{ display: 'contents' }}>
+        <div style={{ display: 'contents' }}>
+          <StatsLineEnhanced {...props(source)} />
+        </div>
+      </div>,
+    )
+    expect(rowOf(view).hasAttribute('data-dock-row')).toBe(false)
+  })
+})
+
+/**
+ * The split dock contract (DSH >= 0.2.1-alpha.1): the host turned the single
+ * 'stats' entry into one entry per pill, so each pill is now its own component
+ * with its own empty check and its own dialog state. The pre-split row's shared
+ * `openPill` slot is unreachable across two independent entries, so mutual
+ * exclusion rides stat-dialog's capture-phase outside click instead.
+ *
+ * The two components here are what src/client/index.tsx registers at the
+ * official ids ('activity' / 'usage', priority -1); the host renders them as
+ * siblings inside its own `.dock` flex row.
+ */
+describe('split dock entries', () => {
+  /** The anchor a split entry renders as its root. */
+  const anchorOf = (view: ReturnType<typeof render>): HTMLElement => {
+    const anchor = view.container.firstElementChild
+    expect(anchor).not.toBeNull()
+    return anchor as HTMLElement
+  }
+
+  it('renders the activity pill as a bare entry: no pre-split row container', () => {
+    const { source } = makeSource([assistant(1, 1), tool()])
+    const view = render(<StatsActivityEntry {...props(source)} />)
+    // The host's `.dock` owns the row now, so the plugin must not draw one.
+    expect(view.container.querySelector('[data-composer-stats]')).toBeNull()
+    expect(view.container.querySelector('[data-dock-row]')).toBeNull()
+    expect(anchorOf(view).tagName).toBe('SPAN')
+    expect(screen.getByText('1 轮 · 1 步')).toBeTruthy()
+  })
+
+  it('carries the dock text tier on the split anchor, not a row tier', () => {
+    const { source } = makeSource([assistant(1, 1)])
+    const view = render(<StatsActivityEntry {...props(source)} />)
+    // `.root` used to set the tier for the whole row; a split entry is a child
+    // of the host's dock row instead, so its anchor declares the tier itself.
+    expect(anchorOf(view).className).toContain('dockAnchor')
+    expect(render(<StatsLineEnhanced {...props(source)} />).container
+      .querySelector('[data-composer-stats]')!.className).not.toContain('dockAnchor')
+  })
+
+  it('renders the usage pill as a bare entry too', () => {
+    const { source } = makeSource([assistant(1, 1)])
+    const view = render(<StatsUsageEntry {...props(source)} />)
+    expect(view.container.querySelector('[data-composer-stats]')).toBeNull()
+    expect(anchorOf(view).className).toContain('dockAnchor')
+    expect(screen.getByRole('button', { name: '105 tok · 缓存命中 90%' })).toBeTruthy()
+  })
+
+  it('hides the activity entry with no settled step, whatever the token usage', () => {
+    const { source } = makeSource()
+    const view = render(<StatsActivityEntry {...props(source, { tokenUsage: USAGE })} />)
+    expect(view.container.textContent).toBe('')
+  })
+
+  it('hides the usage entry when no step billed anything', () => {
+    const { source } = makeSource()
+    const view = render(<StatsUsageEntry {...props(source, {
+      tokenUsage: { uncachedInputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    })} />)
+    expect(view.container.textContent).toBe('')
+  })
+
+  it('hides the usage entry when no projection is composed', () => {
+    const { source } = makeSource([assistant(1, 1)])
+    const view = render(<StatsUsageEntry {...props(source, {})} />)
+    expect(view.container.textContent).toBe('')
+  })
+
+  it('keeps the two entries mutually exclusive through the outside click', () => {
+    const { source } = makeSource()
+    const values = {
+      tokenUsage: USAGE,
+      sessionStats: sessionStats({ turns: 1, steps: 1, llmMs: 1100 }),
+    }
+    // The host lays the two entries out as siblings in its own flex dock row.
+    render(
+      <div style={{ display: 'flex', flexDirection: 'row' }}>
+        <StatsActivityEntry {...props(source, values)} />
+        <StatsUsageEntry {...props(source, values)} />
+      </div>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: '1 轮 · 1 步' }))
+    expect(screen.getAllByRole('dialog')).toHaveLength(1)
+    expect(screen.getByRole('dialog').textContent).toContain('用时与速度')
+    // Each pill owns its own open state now, so the incumbent is closed by the
+    // capture-phase click rather than by a shared slot.
+    fireEvent.click(screen.getByRole('button', { name: '105 tok · 缓存命中 90%' }))
+    expect(screen.getAllByRole('dialog')).toHaveLength(1)
+    const dialog = screen.getByRole('dialog')
+    expect(dialog.textContent).toContain('Token 用量')
+    expect(dialog.textContent).not.toContain('用时与速度')
+  })
+
+  it('keeps each split entry on its own toggles', () => {
+    statsLineState.setStreamThroughput(true)
+    statsLineState.setCachePrecision(true)
+    const { source } = makeSource([assistant(1, 1)], { turn: 1, step: 1, blocks: [] })
+    render(<StatsUsageEntry {...props(source, { tokenUsage: { uncachedInputTokens: 59, outputTokens: 5, cacheReadTokens: 341, cacheWriteTokens: 0 } })} />)
+    // cachePrecision belongs to the usage entry: the precise rate shows there.
+    expect(screen.getByRole('button', { name: '405 tok · 缓存命中 85.25%' })).toBeTruthy()
+  })
+})
+
+/**
+ * The dock tier is a stylesheet contract: the host moved the row's text tier
+ * from its `.root` onto each entry's `.anchor`, and a split entry has no row of
+ * its own to inherit from. One parsed rule pins it against that drift.
+ */
+describe('split dock anchor tier', () => {
+  it('declares the official secondary-minus-one tier on .dockAnchor', () => {
+    const sheet = readFileSync(
+      join(process.cwd(), 'src', 'client', 'StatsLineEnhanced.module.css'),
+      'utf8',
+    )
+    const dockAnchor = sheet.match(/\.dockAnchor\s*\{([^}]*)\}/)
+    expect(dockAnchor).not.toBeNull()
+    expect(dockAnchor![1]).toContain('font-size: calc(var(--dsh-content-font-size-secondary, 13px) - 1px)')
+    expect(dockAnchor![1]).toContain('line-height: calc(20px + var(--dsh-content-font-delta-secondary, 0px))')
+  })
+})
+

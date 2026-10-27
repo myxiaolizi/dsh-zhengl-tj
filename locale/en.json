@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Usage statistics",
+    "description": "Per-day token trend, activity heatmap, cache hit-rate curve, and per-model / per-provider breakdowns of session token usage."
+  }
+}

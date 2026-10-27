@@ -1,0 +1,115 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="520" viewBox="0 0 720 520" font-family="system-ui,Segoe UI,sans-serif">
+<rect x="8" y="8" width="704" height="504" rx="16" fill="#FFF" stroke="#D9DEE3"/>
+<path d="M168 9v502" stroke="#E7EAEE"/>
+<rect x="22" y="26" width="104" height="28" rx="8" fill="#FFF" stroke="#D9DEE3"/>
+<circle cx="38" cy="40" r="4" fill="none" stroke="#57606A" stroke-width="1.2"/>
+<text x="50" y="44" font-size="11" fill="#1F2328">New Session</text>
+<text x="30" y="90" font-size="12.5" fill="#57606A">Plugins</text>
+<text x="30" y="120" font-size="12.5" fill="#57606A">Automations</text>
+<g><animate attributeName="opacity" dur="6.4s" repeatCount="indefinite" values="0;0;1;1;0" keyTimes="0;0.125;0.1450;0.875;1"/>
+    <rect x="18" y="134" width="134" height="30" rx="9" fill="#EEF1F4"/>
+    <rect x="30" y="142" width="14" height="14" rx="3" fill="none" stroke="#4D6BFE" stroke-width="1.6"/>
+    <path d="M33 152v-5M36.5 152v-8M40 152v-3" stroke="#4D6BFE" stroke-width="1.6" stroke-linecap="round"/>
+    <text x="52" y="154" font-size="12" font-weight="600" fill="#1F2328">Usage statistics</text>
+  </g>
+<text x="30" y="186" font-size="11" fill="#8C959F">Workspace</text>
+<text x="30" y="212" font-size="11" fill="#57606A">dsh-usage-stats…</text>
+<g><animate attributeName="opacity" dur="6.4s" repeatCount="indefinite" values="0;0;1;1;0" keyTimes="0;0.25;0.2700;0.875;1"/>
+<rect x="192" y="30" width="299" height="28" rx="8" fill="#F6F8FA" stroke="#E3E7EB"/>
+<text x="215" y="47.5" font-size="10.5" text-anchor="middle" fill="#57606A">Today</text>
+<text x="260.5" y="47.5" font-size="10.5" text-anchor="middle" fill="#57606A">3 days</text>
+<text x="307.5" y="47.5" font-size="10.5" text-anchor="middle" fill="#57606A">7 days</text>
+<text x="357.5" y="47.5" font-size="10.5" text-anchor="middle" fill="#57606A">14 days</text>
+<rect x="385" y="32" width="51" height="24" rx="6" fill="#FFF" stroke="#D9DEE3"/>
+<text x="410.5" y="47.5" font-size="10.5" text-anchor="middle" fill="#1F2328" font-weight="600">30 days</text>
+<text x="463.5" y="47.5" font-size="10.5" text-anchor="middle" fill="#57606A">90 days</text>
+<text x="688" y="47.5" font-size="11" text-anchor="end" fill="#57606A">Rebuild</text>
+<text x="630" y="47.5" font-size="11" text-anchor="end" fill="#57606A">Refresh</text>
+</g>
+<g><animate attributeName="opacity" dur="6.4s" repeatCount="indefinite" values="0;0;1;1;0" keyTimes="0;0.3125;0.3325;0.875;1"/>
+<rect x="192" y="72" width="173.33333333333334" height="58" rx="10" fill="#FFF" stroke="#E3E7EB"/>
+<text x="206" y="92" font-size="10.5" fill="#57606A">Tokens used</text>
+<text x="206" y="110" font-size="17" font-weight="600" fill="#1F2328">4.51B</text>
+<text x="206" y="123" font-size="9" fill="#8C959F">4,510,000,000 tokens</text>
+<rect x="373.33333333333337" y="72" width="133.33333333333334" height="58" rx="10" fill="#FFF" stroke="#E3E7EB"/>
+<text x="387.33333333333337" y="92" font-size="10.5" fill="#57606A">Avg cache hit rate</text>
+<text x="387.33333333333337" y="110" font-size="17" font-weight="600" fill="#1F2328">97.8%</text>
+<text x="387.33333333333337" y="123" font-size="9" fill="#8C959F">4.41B cached</text>
+<rect x="514.6666666666667" y="72" width="173.33333333333334" height="58" rx="10" fill="#FFF" stroke="#E3E7EB"/>
+<text x="528.6666666666667" y="92" font-size="10.5" fill="#57606A">Top model</text>
+<text x="528.6666666666667" y="110" font-size="12.5" font-weight="600" fill="#1F2328">deepseek-v4-pro</text>
+<text x="528.6666666666667" y="123" font-size="9" fill="#8C959F">deepseek</text>
+</g>
+<g><animate attributeName="opacity" dur="6.4s" repeatCount="indefinite" values="0;0;1;1;0" keyTimes="0;0.375;0.3950;0.875;1"/>
+<text x="192" y="152" font-size="13" font-weight="600" fill="#1F2328">Activity heatmap</text>
+<g font-size="9" fill="#8C959F"><text x="540" y="152">Less</text><rect x="564" y="143" width="10" height="10" rx="2" fill="#EBEDF0"/><rect x="578" y="143" width="10" height="10" rx="2" fill="#D5DCFF"/><rect x="592" y="143" width="10" height="10" rx="2" fill="#B8C6FF"/><rect x="606" y="143" width="10" height="10" rx="2" fill="#9DB0FF"/><rect x="620" y="143" width="10" height="10" rx="2" fill="#7990FE"/><rect x="634" y="143" width="10" height="10" rx="2" fill="#4D6BFE"/><text x="654" y="152">More</text></g>
+<clipPath id="hw"><rect x="192" y="160" width="0" height="64"><animate attributeName="width" dur="6.4s" repeatCount="indefinite" values="0;0;496;496" keyTimes="0;0.375;0.4375;1"/></rect></clipPath>
+<g clip-path="url(#hw)">
+<rect x="192" y="164" width="15" height="15" rx="3" fill="#D5DCFF"/><rect x="211" y="164" width="15" height="15" rx="3" fill="#EBEDF0"/><rect x="230" y="164" width="15" height="15" rx="3" fill="#B8C6FF"/><rect x="249" y="164" width="15" height="15" rx="3" fill="#D5DCFF"/><rect x="268" y="164" width="15" height="15" rx="3" fill="#9DB0FF"/><rect x="287" y="164" width="15" height="15" rx="3" fill="#EBEDF0"/><rect x="306" y="164" width="15" height="15" rx="3" fill="#D5DCFF"/><rect x="325" y="164" width="15" height="15" rx="3" fill="#7990FE"/><rect x="344" y="164" width="15" height="15" rx="3" fill="#B8C6FF"/><rect x="363" y="164" width="15" height="15" rx="3" fill="#EBEDF0"/><rect x="382" y="164" width="15" height="15" rx="3" fill="#D5DCFF"/><rect x="401" y="164" width="15" height="15" rx="3" fill="#9DB0FF"/><rect x="420" y="164" width="15" height="15" rx="3" fill="#D5DCFF"/><rect x="439" y="164" width="15" height="15" rx="3" fill="#EBEDF0"/><rect x="458" y="164" width="15" height="15" rx="3" fill="#B8C6FF"/><rect x="477" y="164" width="15" height="15" rx="3" fill="#4D6BFE"/><rect x="496" y="164" width="15" height="15" rx="3" fill="#D5DCFF"/><rect x="515" y="164" width="15" height="15" rx="3" fill="#EBEDF0"/><rect x="534" y="164" width="15" height="15" rx="3" fill="#9DB0FF"/><rect x="553" y="164" width="15" height="15" rx="3" fill="#D5DCFF"/><rect x="572" y="164" width="15" height="15" rx="3" fill="#B8C6FF"/><rect x="591" y="164" width="15" height="15" rx="3" fill="#EBEDF0"/><rect x="610" y="164" width="15" height="15" rx="3" fill="#D5DCFF"/><rect x="629" y="164" width="15" height="15" rx="3" fill="#7990FE"/><rect x="648" y="164" width="15" height="15" rx="3" fill="#B8C6FF"/><rect x="667" y="164" width="15" height="15" rx="3" fill="#D5DCFF"/>
+<rect x="192" y="184" width="15" height="15" rx="3" fill="#EBEDF0"/><rect x="211" y="184" width="15" height="15" rx="3" fill="#B8C6FF"/><rect x="230" y="184" width="15" height="15" rx="3" fill="#D5DCFF"/><rect x="249" y="184" width="15" height="15" rx="3" fill="#9DB0FF"/><rect x="268" y="184" width="15" height="15" rx="3" fill="#EBEDF0"/><rect x="287" y="184" width="15" height="15" rx="3" fill="#D5DCFF"/><rect x="306" y="184" width="15" height="15" rx="3" fill="#7990FE"/><rect x="325" y="184" width="15" height="15" rx="3" fill="#D5DCFF"/><rect x="344" y="184" width="15" height="15" rx="3" fill="#EBEDF0"/><rect x="363" y="184" width="15" height="15" rx="3" fill="#B8C6FF"/><rect x="382" y="184" width="15" height="15" rx="3" fill="#9DB0FF"/><rect x="401" y="184" width="15" height="15" rx="3" fill="#D5DCFF"/><rect x="420" y="184" width="15" height="15" rx="3" fill="#EBEDF0"/><rect x="439" y="184" width="15" height="15" rx="3" fill="#D5DCFF"/><rect x="458" y="184" width="15" height="15" rx="3" fill="#4D6BFE"/><rect x="477" y="184" width="15" height="15" rx="3" fill="#B8C6FF"/><rect x="496" y="184" width="15" height="15" rx="3" fill="#EBEDF0"/><rect x="515" y="184" width="15" height="15" rx="3" fill="#D5DCFF"/><rect x="534" y="184" width="15" height="15" rx="3" fill="#7990FE"/><rect x="553" y="184" width="15" height="15" rx="3" fill="#B8C6FF"/><rect x="572" y="184" width="15" height="15" rx="3" fill="#D5DCFF"/><rect x="591" y="184" width="15" height="15" rx="3" fill="#9DB0FF"/><rect x="610" y="184" width="15" height="15" rx="3" fill="#EBEDF0"/><rect x="629" y="184" width="15" height="15" rx="3" fill="#D5DCFF"/><rect x="648" y="184" width="15" height="15" rx="3" fill="#B8C6FF"/><rect x="667" y="184" width="15" height="15" rx="3" fill="#EBEDF0"/>
+<rect x="192" y="204" width="15" height="15" rx="3" fill="#B8C6FF"/><rect x="211" y="204" width="15" height="15" rx="3" fill="#D5DCFF"/><rect x="230" y="204" width="15" height="15" rx="3" fill="#EBEDF0"/><rect x="249" y="204" width="15" height="15" rx="3" fill="#7990FE"/><rect x="268" y="204" width="15" height="15" rx="3" fill="#D5DCFF"/><rect x="287" y="204" width="15" height="15" rx="3" fill="#B8C6FF"/><rect x="306" y="204" width="15" height="15" rx="3" fill="#EBEDF0"/><rect x="325" y="204" width="15" height="15" rx="3" fill="#9DB0FF"/><rect x="344" y="204" width="15" height="15" rx="3" fill="#D5DCFF"/><rect x="363" y="204" width="15" height="15" rx="3" fill="#4D6BFE"/><rect x="382" y="204" width="15" height="15" rx="3" fill="#EBEDF0"/><rect x="401" y="204" width="15" height="15" rx="3" fill="#B8C6FF"/><rect x="420" y="204" width="15" height="15" rx="3" fill="#D5DCFF"/><rect x="439" y="204" width="15" height="15" rx="3" fill="#7990FE"/><rect x="458" y="204" width="15" height="15" rx="3" fill="#EBEDF0"/><rect x="477" y="204" width="15" height="15" rx="3" fill="#D5DCFF"/><rect x="496" y="204" width="15" height="15" rx="3" fill="#9DB0FF"/><rect x="515" y="204" width="15" height="15" rx="3" fill="#B8C6FF"/><rect x="534" y="204" width="15" height="15" rx="3" fill="#D5DCFF"/><rect x="553" y="204" width="15" height="15" rx="3" fill="#EBEDF0"/><rect x="572" y="204" width="15" height="15" rx="3" fill="#7990FE"/><rect x="591" y="204" width="15" height="15" rx="3" fill="#D5DCFF"/><rect x="610" y="204" width="15" height="15" rx="3" fill="#B8C6FF"/><rect x="629" y="204" width="15" height="15" rx="3" fill="#9DB0FF"/><rect x="648" y="204" width="15" height="15" rx="3" fill="#EBEDF0"/><rect x="667" y="204" width="15" height="15" rx="3" fill="#D5DCFF"/>
+</g>
+</g>
+<g><animate attributeName="opacity" dur="6.4s" repeatCount="indefinite" values="0;0;1;1;0" keyTimes="0;0.4375;0.4575;0.875;1"/>
+<text x="192" y="240" font-size="13" font-weight="600" fill="#1F2328">Daily token trend</text>
+<clipPath id="tw"><rect x="192" y="248" width="0" height="112"><animate attributeName="width" dur="6.4s" repeatCount="indefinite" values="0;0;496;496" keyTimes="0;0.4375;0.5;1"/></rect></clipPath>
+<g clip-path="url(#tw)">
+<rect x="192" y="356" width="496" height="1" fill="#E7EAEE"/>
+<rect x="200" y="314" width="21" height="42" fill="#509FFF"/>
+<rect x="200" y="283" width="21" height="31" fill="#6D9A73"/>
+<rect x="200" y="263" width="21" height="20" fill="#D69159"/>
+<rect x="239" y="329" width="21" height="27" fill="#509FFF"/>
+<rect x="239" y="306" width="21" height="23" fill="#6D9A73"/>
+<rect x="239" y="290" width="21" height="16" fill="#D69159"/>
+<rect x="278" y="325" width="21" height="31" fill="#509FFF"/>
+<rect x="278" y="298" width="21" height="27" fill="#6D9A73"/>
+<rect x="278" y="280" width="21" height="18" fill="#D69159"/>
+<rect x="317" y="336" width="21" height="20" fill="#509FFF"/>
+<rect x="317" y="318" width="21" height="18" fill="#6D9A73"/>
+<rect x="317" y="306" width="21" height="12" fill="#D69159"/>
+<rect x="356" y="332" width="21" height="24" fill="#509FFF"/>
+<rect x="356" y="311" width="21" height="21" fill="#6D9A73"/>
+<rect x="356" y="297" width="21" height="14" fill="#D69159"/>
+<rect x="395" y="340" width="21" height="16" fill="#509FFF"/>
+<rect x="395" y="326" width="21" height="14" fill="#6D9A73"/>
+<rect x="395" y="316" width="21" height="10" fill="#D69159"/>
+<rect x="434" y="345" width="21" height="11" fill="#509FFF"/>
+<rect x="434" y="336" width="21" height="9" fill="#6D9A73"/>
+<rect x="434" y="330" width="21" height="6" fill="#D69159"/>
+<rect x="473" y="314" width="21" height="42" fill="#509FFF"/>
+<rect x="473" y="283" width="21" height="31" fill="#6D9A73"/>
+<rect x="473" y="263" width="21" height="20" fill="#D69159"/>
+<rect x="512" y="329" width="21" height="27" fill="#509FFF"/>
+<rect x="512" y="306" width="21" height="23" fill="#6D9A73"/>
+<rect x="512" y="290" width="21" height="16" fill="#D69159"/>
+<rect x="551" y="325" width="21" height="31" fill="#509FFF"/>
+<rect x="551" y="298" width="21" height="27" fill="#6D9A73"/>
+<rect x="551" y="280" width="21" height="18" fill="#D69159"/>
+<rect x="590" y="336" width="21" height="20" fill="#509FFF"/>
+<rect x="590" y="318" width="21" height="18" fill="#6D9A73"/>
+<rect x="590" y="306" width="21" height="12" fill="#D69159"/>
+<rect x="629" y="332" width="21" height="24" fill="#509FFF"/>
+<rect x="629" y="311" width="21" height="21" fill="#6D9A73"/>
+<rect x="629" y="297" width="21" height="14" fill="#D69159"/>
+<rect x="668" y="340" width="21" height="16" fill="#509FFF"/>
+<rect x="668" y="326" width="21" height="14" fill="#6D9A73"/>
+<rect x="668" y="316" width="21" height="10" fill="#D69159"/>
+<path d="M210 300C284 292 344 304 424 296S554 286 634 292 694 286" fill="none" stroke="#4D6BFE" stroke-width="2.5"/>
+</g>
+<g font-size="9" fill="#8C959F"><rect x="192" y="372" width="14" height="3" rx="1.5" fill="#4D6BFE"/><text x="212" y="376">Cache hit rate</text></g>
+</g>
+<g><animate attributeName="opacity" dur="6.4s" repeatCount="indefinite" values="0;0;1;1;0" keyTimes="0;0.5;0.5200;0.875;1"/>
+<text x="192" y="394" font-size="13" font-weight="600" fill="#1F2328">Model usage</text>
+<circle cx="258" cy="454" r="42" fill="none" stroke="#EBEDF0" stroke-width="19"/>
+<circle cx="258" cy="454" r="42" fill="none" stroke="#509FFF" stroke-width="19" stroke-dasharray="72.8 191.1" stroke-dashoffset="0.0" transform="rotate(-90 258 454)"/>
+<circle cx="258" cy="454" r="42" fill="none" stroke="#6D9A73" stroke-width="19" stroke-dasharray="59.4 204.5" stroke-dashoffset="-72.8" transform="rotate(-90 258 454)"/>
+<circle cx="258" cy="454" r="42" fill="none" stroke="#D69159" stroke-width="19" stroke-dasharray="36.2 227.7" stroke-dashoffset="-132.2" transform="rotate(-90 258 454)"/>
+<circle cx="258" cy="454" r="42" fill="none" stroke="#B68CF5" stroke-width="19" stroke-dasharray="95.5 168.4" stroke-dashoffset="-168.4" transform="rotate(-90 258 454)"/>
+<text x="258" y="456" font-size="13" font-weight="600" fill="#1F2328" text-anchor="middle">4.51B</text>
+<text x="258" y="469" font-size="8.5" fill="#8C959F" text-anchor="middle">tokens</text>
+<circle cx="352" cy="414" r="4" fill="#509FFF"/><text x="362" y="418" font-size="10.5" fill="#57606A">deepseek-v4-pro</text><text x="688" y="418" font-size="10.5" fill="#57606A" text-anchor="end">27.6%</text>
+<circle cx="352" cy="440" r="4" fill="#6D9A73"/><text x="362" y="444" font-size="10.5" fill="#57606A">deepseek-r1</text><text x="688" y="444" font-size="10.5" fill="#57606A" text-anchor="end">22.5%</text>
+<circle cx="352" cy="466" r="4" fill="#D69159"/><text x="362" y="470" font-size="10.5" fill="#57606A">deepseek-v3</text><text x="688" y="470" font-size="10.5" fill="#57606A" text-anchor="end">13.7%</text>
+<circle cx="352" cy="492" r="4" fill="#B68CF5"/><text x="362" y="496" font-size="10.5" fill="#57606A">Other</text><text x="688" y="496" font-size="10.5" fill="#57606A" text-anchor="end">36.2%</text>
+</g>
+</svg>

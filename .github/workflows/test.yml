@@ -1,0 +1,42 @@
+# Single-host regression: devDependencies pin every @deepseek-ai/* package to
+# the DSH 0.1.7-rc.2 line, so every push/PR runs the full build+test suite
+# against exactly that baseline. The peer range states the capability floor
+# only (DSH >= 0.1.7-rc.1) and is optional: it matches only the pre-release of
+# the same tuple, so the supported versions live in the README.
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # pnpm must be on PATH before setup-node's cache hook runs.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # tsconfig.json covers src AND tests, while the build's declaration pass
+      # (tsconfig.build.json) covers src only — so this is the step that typechecks
+      # the test files.
+      - name: Typecheck
+        run: pnpm typecheck
+
+      # pnpm test = pnpm build && vitest run (manifest-consistency asserts the
+      # built artifacts exist, same ordering as release.yml).
+      - name: Test
+        run: pnpm test

@@ -1,0 +1,115 @@
+# DSH Usage Statistics Panel
+
+English | [中文](README.md)
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/banner-dark.svg">
+    <img src="docs/banner.svg" alt="DSH Usage Statistics Panel" width="720">
+  </picture>
+</p>
+
+![npm version](https://img.shields.io/npm/v/dsh-zhengl-tj)
+![npm downloads](https://img.shields.io/npm/dm/dsh-zhengl-tj)
+![License](https://img.shields.io/github/license/myxiaolizi/dsh-zhengl-tj)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue)
+![dsh-plugin](https://img.shields.io/badge/dsh-plugin-4D6BFE)
+[![Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)
+[![Commit activity](https://img.shields.io/github/commit-activity/t/myxiaolizi/dsh-zhengl-tj)](https://github.com/myxiaolizi/dsh-zhengl-tj/graphs/commit-activity)
+[![Last commit](https://img.shields.io/github/last-commit/myxiaolizi/dsh-zhengl-tj)](https://github.com/myxiaolizi/dsh-zhengl-tj/commits)
+
+A usage statistics panel plugin for the DSH web UI: per-day / per-hour token trend, a GitHub-style activity heatmap, a cache hit-rate curve, and two breakdowns — by model and by provider (donut + detail list each) — living on the plugin's own page inside the Plugins page, with its own row in the left rail.
+
+All charts are hand-drawn SVG with no chart library; colours are a fixed rank palette (`--dsw-chart-1..10` for the top ten models, `--dsw-provider-1..5` for the top five providers, everything else collapses into a gray "Other" bucket), lifted for the dark theme and tracking the DSH theme.
+
+<p align="center">
+  <img src="docs/demo.svg" alt="demo: the Usage statistics row in the left rail lights up, then the panel fills in with the toolbar, cards, heatmap, trend and the model donut" width="720">
+</p>
+
+## Preview
+
+<p align="center">
+  <img src="docs/images/panel-overview.png" alt="Panel overview: toolbar, summary cards, activity heatmap and daily token trend" width="720">
+</p>
+
+<p align="center">
+  <img src="docs/images/model-usage.png" alt="Model usage and provider usage: donuts with detail lists" width="720">
+</p>
+
+<p align="center">
+  <img src="docs/images/provider-usage.png" alt="Provider usage: a donut with a detail list, the top five in their own colours and the tail folded into an expandable Other bucket" width="720">
+</p>
+
+## Features
+
+- **Time ranges**: today, last 3 / 7 / 14 / 30 / 90 days, or a custom from/to pair; today and last 3 days bucket per hour, everything else per day
+- **Summary cards**: token usage (compact K/M/B headline with the exact count and its `tokens` unit underneath), sessions (completed turns), requests, active days, average cache hit-rate (with the absolute cached volume), top model
+- **52-week activity heatmap**: GitHub-style day cells, hover for the day's detail; the data window is a fixed year and the column count adapts to the available width (a narrow pane shows fewer weeks), so the chart always spans its container edge to edge
+- **Token trend**: stacked bars with a smooth cache hit-rate curve (Catmull-Rom), bucketed per hour for today / last 3 days and per day otherwise; hover for the per-model breakdown; the plot spans the container width at any size
+- **Model usage**: donut + detail list; the top ten models keep distinct colours, the tail collapses into an expandable "Other" row, and the ring's diameter adapts to the available width between 200 and 280px, centred against the list beside it
+- **Provider usage**: the same anatomy one dimension up — the top five providers keep distinct colours from their own palette, the tail collapses into a gray "Other" bucket, hovering either side lights the other, and the ring's hover tip lists every model that provider served. Each row expands (the Other bucket opens the providers it folded, and each of those opens its own models); expanding never resizes the ring
+- **Bottom-bar enhancements**: three switches at the bottom of the panel, all in the same framed style and applied instantly — "Precise cache hit rate" (two decimals, e.g. 85.25%), "Session token breakdown" (total, input, cached input, uncached input and output in place of the default input/output pair), and "Streaming throughput" (the speed reading refreshes to a live estimate on every stream delta and hands back to the session's exact figure once the step settles; the estimate starts from DeepSeek's published character density and is calibrated against the chars-per-token ratio measured from the session's own settled steps, and the live rate counts only the token growth actually observed inside the last 2 s and smooths it, so neither a backlog the UI delivered late nor one noisy frame moves the display, and a step that goes quiet holds its last reading instead of dropping back to the session average)
+- **History backfill**: on first enable, the plugin enumerates and replays existing session logs; for a live session the collector attached to mid-flight, its pre-attachment history is recovered on the next boot by replaying the log prefix below the recorded seq boundary, so historical usage is accounted from day one as faithfully as the logs allow
+- **Local persistence**: data lands in `$DSH_HOME/storages/usage_history.json` (storage-domain), fully local, no external services
+
+## Install
+
+```sh
+dsh plugin --profile <name> add dsh-zhengl-tj@latest
+```
+
+After mounting, **hard-refresh the browser** (Cmd/Ctrl+Shift+R): client-half changes hot-reload in DSH, no restart needed; only host-half updates (collector/storage/routes) require restarting DSH.
+
+Once mounted there are two ways in: the **Usage statistics** row in the left rail under New Session, or **Plugins** → **Installed** → `usage-statistics-panel` on its detail page (the card and the detail page take their title, description, and icon from this package's `locale/*.json` and `icon.svg`, following the interface language across Simplified Chinese, Traditional Chinese, and English; the full package name is still listed there as a code line). Both render the same panel. The standalone panel also carries a **back** control in its top-left corner, returning to whatever was selected before it — the Conversation, the Plugins page, or another plugin's panel.
+
+**Compatibility**: this plugin supports DeepSeek Harness `>= 0.1.7-rc.1`; dev dependencies track host `0.1.7-rc.2`, and the plugin has been exercised on isolated instances of the **stable `0.2.0-rc.2`**, the **pre-release `0.2.1-alpha.2`**, and **`0.2.1-rc.2`** (panel data plus the four fence paths). V3 / V4 session-log compatibility is covered by unit tests (V4 has been the released format since `0.2.0-rc.2`, and the folded fields such as `assistant/message.data.usage` are identical across both). The dual-path backfill (`list`+`inspect` on `0.1.2-rc.1`, `list`+`open`+paged `read`+`close` from `0.1.3-alpha.*`) is retained.
+
+The `/usage/api` trust fence reads its sources per host line too: from `0.2.1-alpha.2` the host moved the explicit authorities onto `webStartup`, deleted `webRuntime`, and began admitting the listener's own bind address; on the earlier lines the authoritative list is `webRuntime.trustedHosts` (the LAN literals sampled at bind time plus the invocation's authorities). The fence reads `webRuntime` then `webStartup`, and always admits `webServer.host` as a bind literal (unspecified spellings excepted), matching the official semantics on both lines.
+
+> **Known difference**: the two official stat pills follow the performance-usage display preference (its compact mode keeps only the speed, or only the cache hit), while this plugin's shadowing entries always render the detailed reading. That preference lives in ui-chat's private config form, and reading it across plugins would be fragile coupling, so it is deliberately not implemented — the behaviour is identical on both host lines and is not something `0.2.1-alpha.2` introduced.
+
+The bottom-bar row adapts to the container it is rendered in: from `0.1.6-alpha.2` the host places it in a flex row beside the context-occupancy ring (which owns the centring, the gap, the top pad and the side clearance), while through `0.1.6-alpha.1` the row still owns its content width, its side gutters and its 4px top pad — one build stays aligned on both.
+
+> The `@deepseek-ai/*` peer declarations state the capability floor only (`>=0.1.7-rc.1` is the earliest interface surface the plugin uses) and are all marked optional. Under semver's pre-release rule that range matches only the pre-release of the same tuple — `0.1.7-rc.2` satisfies it, while the next pre-release line (`0.1.8-rc.1`) does not — so the supported host versions are those stated in this section rather than npm peer validation.
+
+> **Older-host users**: on DeepSeek Harness `0.1.6-alpha.2` or earlier, install plugin version `0.3.0` or older. On the `0.1.7` line the host renamed the whole `@deepseek-ai/dsh-client-ui-primitives` icon export set to a weight-based scheme (`*Outline16` → `*OutlineRegular` / `*Medium`) with **zero overlap** between the two generations: the old names resolve to `undefined` on `0.1.7+` and break the bottom info bar — one build cannot serve both.
+
+## Data source
+
+The collector is observational, fed by three sources: `assistant/message` and `assistant/chunk` on the session event stream (`session/event`) for every agent-loop call, `compaction/summary` on that same stream for a compaction's summarization call (its usage lives only there — a summary produces no `assistant/message`), and the `llm/stream` waterfall for an AI-generated session title (a title call leaves only its request in the session log, never its usage). All three read provider-reported `TokenUsage` (input / output / cache-read / cache-write). Dedupe and attribution differ per source: agent-loop calls dedupe by `(turn, step)` WITHIN one session (each call counts once, keeping the first report — the shipped adapters report identical values on the streaming sample and the final message; concurrent sessions never swallow each other's samples), with model attribution preferring the message's own `source` (stamped per call) and falling back to the session's route fold (`request/context` events or the session's `requestContext()`), so a host restart never drops samples into the "(unknown)" bucket; a compaction dedupes by `compactionId` and attributes by the event's own `provider`/`model`; a title call counts once (its tokens plus one request), taking the LAST usage sample in its stream — adapters report cumulative values, and summing them would double count. On first enable it also backfills by replaying persisted session logs.
+
+> Note: usage accumulates from the day the panel is enabled (including the backfill). Sessions whose logs predate the feature carry no provider-reported usage and cannot be reconstructed. **Session titles are the one exception**: their usage is not in the session log at all — only the running plugin can intercept it on `llm/stream` — so it can be neither backfilled nor recovered for calls that happened while the plugin was not running.
+
+**Token semantics**: the headline token total on the cards and in the trend is PROVIDER-INCLUSIVE — uncached input + output + cache reads + cache writes (DeepSeek splits prompt tokens into disjoint input/cache-read buckets, so a naive input+output sum would hide the typically dominant cached share). Its **scope** is agent-loop calls, compaction summarization and AI-generated session titles; it does **not** include web search — DSH's search backends call their provider endpoint directly over a provider-private HTTP client, leaving no usage in the session log and never passing through `llm/stream`, so the plugin cannot observe it, and that item is the only gap that can remain against a provider dashboard. The average cache hit-rate keeps an input-side-only denominator (hits + misses), and the hit-rate card also shows the absolute cached volume; the two denominators never mix.
+
+**Compaction accounting**: one compaction counts one request — the backend's own retries are invisible (a compaction call does not pass through `llm-retry`), and a failed compaction never appends `compaction/summary`, so that call is not counted even though it may have been billed. A **session title** likewise counts one request and one token sample per call (the LAST usage sample in its stream), and is still recorded when a timeout or a cancellation cuts the stream short.
+
+**Rebuilding stats**: the **Rebuild** button in the toolbar, to the right of **Refresh**, is that action behind a two-press confirm — the first press turns it red and reads "Rebuild?", and only the second runs it (moving focus away, pressing Esc, or five seconds without a second press cancels it). It is the same as `POST /usage/api/reset` (behind the same trust fence as the panel): it wipes the local statistics and replays every persisted session log under the CURRENT attribution rules — the escape hatch for corrupted history or attribution-logic upgrades. Sessions still open at reset time are re-bounded at their wipe-time log length: everything below is rebuilt by the replay, everything after stays with the live collector, and nothing counts twice.
+
+## Development
+
+```sh
+pnpm install
+pnpm typecheck   # tsc --noEmit
+pnpm test        # vitest
+pnpm build       # tsc declarations + tsdown (host ESM + dual-channel client bundles)
+```
+
+## Design & implementation
+
+- **Host half** (`src/`): `collector` (event subscription + backfill fold), `store` (the `usage_history` storage domain), `query` (range aggregation, a TS translation of the reasonix query.go), `routes` (the fenced `/usage/api` JSON routes, same trust fence as the `/api` gateway)
+- **Client half** (`src/client/`): `UsageStatsPanel.tsx` (hand-drawn SVG charts ported from the reasonix panel + the rank palette), `locales` (en / zh / zh-TW), `api` (the `/usage/api` fetch wrapper)
+- **Dual-channel bundles**: `lib/client.js` (official profile channel, bundle id = package name) and `lib/client-registry.js` (plugin-registry channel, bundle id = manifest id)
+- Full design notes: [docs/design.md](docs/design.md)
+
+## Acknowledgements
+
+This panel is a port of the usage statistics feature the author originally built for [DeepSeek-Reasonix](https://github.com/esengine/DeepSeek-Reasonix) (PR [#7238](https://github.com/esengine/DeepSeek-Reasonix/pull/7238) and [#7503](https://github.com/esengine/DeepSeek-Reasonix/pull/7503)). The front-end charts are largely reused from that implementation; the data layer is rebuilt on DSH's session logs and storage-domain.
+
+## Activity
+
+[![myxiaolizi/dsh-zhengl-tj GitStock K-Line Chart](https://gitstock.org/myxiaolizi/dsh-zhengl-tj/stock.svg)](https://gitstock.org/myxiaolizi/dsh-zhengl-tj)
+
+## License
+
+MIT

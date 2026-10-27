@@ -1,0 +1,331 @@
+/**
+ * Structural types for the cordis services this plugin consumes, plus the
+ * Context augmentation both halves share. A third-party plugin resolves
+ * outside the DSH monorepo's single cordis instance, so the upstream
+ * `declare module 'cordis'` augmentations do not reach this Context — and
+ * the npm cordis package does not declare the DSH-vendored runtime members
+ * (`ctx.effect`, service properties). The members below mirror the actual
+ * runtime shapes this plugin touches:
+ * - sessionPersistence: @deepseek-ai/dsh-session-persistence (SessionPersistence)
+ * - sessions: host side @deepseek-ai/dsh-session (SessionStore), client side
+ *   the runtime sessions list feed
+ * - storageDomain: @deepseek-ai/dsh-storage-domain (domain hub)
+ * - webServer: @deepseek-ai/dsh-host-webserver (the WebServer)
+ * - slots: the client slot registry (ui-slots)
+ * - locale: the client locale service
+ * - layout: @deepseek-ai/dsh-client-ui-layout (the panel-selection face)
+ * Drift from upstream is contained to this file.
+ *
+ * This file must stay FREE of Node.js types (`node:http`, `node:stream`,
+ * `Buffer`): it is part of the CLIENT-reachable declaration graph (the
+ * `Context` in client components), so a Node import here would leak into
+ * browser-only consumer builds. The webServer faces below are therefore
+ * structural mirrors with plain interfaces.
+ */
+import type { Context } from 'cordis'
+
+/** The request face route handlers see (structural subset of node's
+ *  IncomingMessage: the URL/method/header reads and the async body
+ *  iteration `readJsonBody` uses). */
+export interface UsageHttpRequest {
+  url?: string
+  method?: string
+  headers: Record<string, string | string[] | undefined>
+  [Symbol.asyncIterator](): AsyncIterator<string | Uint8Array>
+}
+
+/** The response face route handlers write to (structural subset of node's
+ *  ServerResponse: the status/header/body writes the routes use). */
+export interface UsageHttpResponse {
+  statusCode: number
+  writeHead(status: number, headers?: Record<string, string>): void
+  end(body?: string | Uint8Array): void
+}
+
+/** One named webserver route (mirror of the host-webserver WebRoute). */
+export interface UsageWebRoute {
+  kind: 'exact' | 'prefix'
+  path: string
+  handler: (req: UsageHttpRequest, res: UsageHttpResponse) => void | Promise<void>
+}
+
+/** The webserver service (mirror of @deepseek-ai/dsh-host-webserver). */
+export interface UsageWebServer {
+  register(route: UsageWebRoute): () => void
+  /** The listener's configured bind address. Present on every host line, but its
+   *  type moved with 0.2.1-alpha.2: through alpha.1 it is the config union
+   *  `'127.0.0.1' | '0.0.0.0'`, and from alpha.2 a concrete IPv4/IPv6 literal
+   *  (that line rejects the unspecified address when its config loads). */
+  host?: string
+  /** The protocol the listener speaks (`'https:'` when TLS is configured).
+   *  Published from 0.2.1-alpha.2; callers treat absence as plain HTTP. */
+  protocol?: 'http:' | 'https:'
+}
+
+/** The web app's start-up values (mirror of @deepseek-ai/dsh-web-app's
+ *  `WebStartupValues`, narrowed to the trust list). This provider is where
+ *  0.2.1-alpha.2 onwards publishes the invocation's explicit `--trusted-host`
+ *  authorities.
+ *
+ *  Deliberately NOT merged into the Context augmentation: cordis' traced
+ *  Context throws on a direct property read of a service the host does not
+ *  register, so these are probed through `ctx.get()` instead (a throw escaping
+ *  the route handler would surface as the webserver's bare 400). */
+export interface UsageWebStartup {
+  trustedHosts: string[]
+}
+
+/** The web runtime service the pre-0.2.1-alpha.2 lines publish: its
+ *  `trustedHosts` is the list the official fence is wired to there — the LAN
+ *  IPv4 literals sampled at bind time followed by the invocation's authorities,
+ *  i.e. a superset of {@link UsageWebStartup.trustedHosts}. Removed upstream in
+ *  0.2.1-alpha.2 ("Support concrete Web listener bind addresses"), which is why
+ *  the fence reads it first and falls back to the start-up values. */
+export interface UsageWebRuntime {
+  trustedHosts?: string[]
+}
+
+/** A session header row (mirror of @deepseek-ai/dsh-session-persistence). */
+export interface UsageSessionHeader {
+  version?: number
+  id: string
+  createdAt?: number
+  cwd?: string
+  parentSession?: string
+  delegationDepth?: number
+}
+
+/** A session event (mirror of @deepseek-ai/dsh-session SessionEvent). */
+export interface UsageSessionEvent<T = unknown> {
+  type: string
+  seq: number
+  time: number
+  data: T
+}
+
+/** One persistence inspection (mirror of dsh-session-persistence's
+ *  SessionInspection, DSH >= 0.1.2-rc.1). `inheritedEventCount` is the exact
+ *  fork-inherited prefix length — 0 for a non-forked session — and is always
+ *  reported by this host line. */
+export interface UsageSessionInspection {
+  meta: UsageSessionHeader
+  events: UsageSessionEvent[]
+  /** Number of leading events this forked session copied from its parent. */
+  inheritedEventCount: number
+}
+
+/** A stored-session snapshot (alpha handle seam: `list` returns these). */
+export interface UsageSessionSnapshot {
+  header: UsageSessionHeader
+  revision?: unknown
+  eventCount?: number
+  sizeBytes?: number
+}
+
+/** One open read channel (alpha handle seam). */
+export interface UsageSessionHandleReader {
+  id: string
+  header: UsageSessionHeader
+  inheritedEventCount: number
+  access: string
+  read(offset?: number, length?: number, options?: { signal?: AbortSignal }): Promise<{ events: readonly UsageSessionEvent[]; eventState?: unknown }>
+  close(): Promise<void>
+}
+
+/** The session persistence service: dual faces for rc.1 (`list`+`inspect`)
+ *  and alpha (`list`+`open`, the only seam since 0.1.3-alpha, `inspect`
+ *  removed upstream in the V3 line). `open` wins when both exist; `list`
+ *  accepts either the rc.1 bare signal or the alpha options object and
+ *  returns either header rows or snapshots (normalized by the collector).
+ *  Verified against DSH 0.1.5-alpha.1: `open`/`read`/`close`/`list` and
+ *  `inheritedEventCount` are unchanged there. */
+export interface UsageSessionPersistence {
+  list(signalOrOptions?: AbortSignal | { signal?: AbortSignal }): Promise<Array<UsageSessionHeader | UsageSessionSnapshot>>
+  inspect?(id: string, signal?: AbortSignal): Promise<UsageSessionInspection>
+  open?(id: string, access: 'read' | 'write', options?: { signal?: AbortSignal }): Promise<UsageSessionHandleReader>
+}
+
+/** The route a session's log records for its model calls (mirror of
+ *  dsh-agent-loop RequestContext). */
+export interface UsageSessionRoute {
+  provider?: string
+  model?: string
+  contextWindow?: number
+}
+
+/** A live session handle (mirror of @deepseek-ai/dsh-session SessionStore
+ *  members this plugin touches; `requestContext` is the authoritative fold
+ *  of the log's `request/context` events and `seq` the log's next-sequence
+ *  watermark — both exposed by every real Session). */
+export interface UsageSessionHandle {
+  id: string
+  cwd?: string
+  createdAt?: number
+  requestContext?(): UsageSessionRoute | undefined
+  /** The session log's next event seq (= its current length; the real
+   *  Session exposes this as a getter). /reset captures it as the wipe-time
+   *  rebuild watermark. */
+  seq?: number
+}
+
+/** The live session store (mirror of @deepseek-ai/dsh-session SessionStore). */
+export interface UsageSessionStore {
+  list(): UsageSessionHandle[]
+  get(id: string): UsageSessionHandle | undefined
+}
+
+/** A storage domain table (mirror of @deepseek-ai/dsh-storage-domain KvTable). */
+export interface UsageKvTable<K extends string, V> {
+  get(key: K): V | undefined
+  entries(): IterableIterator<[K, V]>
+  keys(): IterableIterator<K>
+  readonly size: number
+  put(key: K, value: V): Promise<void>
+  delete(key: K): Promise<boolean>
+  update(key: K, fn: (current: V) => V): Promise<V>
+}
+
+/** A storage domain handle (mirror of @deepseek-ai/dsh-storage-domain Domain). */
+export interface UsageDomain {
+  table(name: string): UsageKvTable<string, unknown>
+  global: { get(): unknown; set(value: unknown): Promise<void> }
+}
+
+/** The storage domain service (mirror of @deepseek-ai/dsh-storage-domain). */
+export interface UsageStorageDomain {
+  open(spec: { name: string; version: number; tables: Record<string, unknown> }): Promise<UsageDomain>
+}
+
+/** One slots.register spec (mirror of the client ui-slots registration shape). */
+export interface UsageSlotEntrySpec {
+  name: string
+  id?: string
+  /** Keyed-slot key. The Plugins page matches a bundle's own configuration
+   *  entry by this value being the bundle's npm package name. */
+  key?: string
+  order?: number
+  priority?: number
+  label?: () => string
+  locale?: string
+  inject?: () => object
+}
+
+/** Owner share the Plugins page passes to a bundle's configuration entry
+ *  (mirror of ui-plugin-manager's PluginConfigViewProps). The page asks for
+ *  `summary` on the `plugins.item` slot only; a bundle's own configuration is
+ *  requested as `page`, and the page draws the title, icon, and crumb itself. */
+export interface UsagePluginConfigOwnerProps {
+  /** Which view the page is requesting. */
+  readonly view: 'summary' | 'page'
+}
+
+/** One stored registration as the ledger exposes it (only the cell id is read
+ *  here; the render-erased entry carries the whole options bag upstream). */
+export interface UsageSlotEntry {
+  options: { id?: string }
+}
+
+/** The client slot registry service (mirror of the client store/ui-slots).
+ *  `entries`/`subscribe` are the inspection surface the composer-dock takeover
+ *  reads to tell which host contract it is shadowing; both are present on
+ *  every host line this plugin supports (verified 0.1.5-rc.2 .. 0.2.1-alpha.2). */
+export interface UsageSlotsService {
+  /** Wait for (or run against) the named slot's declaration. The callback
+   *  returns one disposer or an iterable of disposers (a generator yield
+   *  several register calls as one transaction). */
+  inject(
+    name: string,
+    callback: () => void | (() => void) | Iterable<() => void>,
+  ): void
+  register(spec: UsageSlotEntrySpec, component: unknown): () => void
+  /** Snapshot the registered entries of one slot key. */
+  entries(name: string): readonly UsageSlotEntry[]
+  /** Subscribe to one slot key's registration changes (microtask-batched);
+   *  returns the unsubscribe handle. */
+  subscribe(name: string, listener: () => void): () => void
+}
+
+/** The client-side locale service (mirror of @deepseek-ai/dsh-client-locale). */
+export interface UsageLocaleService {
+  /** Single-locale form: one dictionary for one locale tag. */
+  register(namespace: string, locale: string, dict: Record<string, string>): () => void
+  /** All-locales form: complete dictionaries keyed by built-in locale id. */
+  register(namespace: string, dicts: Record<string, Record<string, string>>): () => void
+  bind(namespace: string): (key: string) => string
+  /** The active locale id ("zh" | "zh-TW" | "en"), for locale-aware formatting. */
+  getLocale(): { active: string }
+}
+
+/** Root-scoped navigation state (mirror of ui-layout's PanelInfo). */
+export interface UsagePanelInfo {
+  /** Selected global panel; null displays the current Conversation. */
+  readonly activePanelId: string | null
+}
+
+/** A read-only observable over the layout store (the `HostObservable` face
+ *  ui-layout exposes on `panelInfo`, narrowed to the two reads this plugin
+ *  makes). */
+export interface UsagePanelInfoSource {
+  getSnapshot(): UsagePanelInfo
+  /** Subscribe to selection changes; returns the unsubscribe handle. */
+  subscribe(listener: () => void): () => void
+}
+
+/** The layout service (mirror of ui-layout's ILayout, narrowed to panel
+ *  selection). The shell keeps NO navigation history: `selectPanel` writes the
+ *  selection and nothing else, so "where did the reader come from" is the
+ *  caller's to remember. */
+export interface UsageLayoutService {
+  /** The current selection, shared with `selectPanel`'s own store. */
+  readonly panelInfo: UsagePanelInfoSource
+  /**
+   * Select a global central panel without changing the current Session.
+   * @param panelId - a registered main key, or null for the Conversation.
+   * @throws when the key is not registered; the current selection survives.
+   */
+  selectPanel(panelId: string | null): void
+}
+
+/** One provider route the LLM service has a registered adapter for (mirror of
+ *  `LlmProviderInfo`). */
+export interface UsageLlmProviderInfo {
+  id: string
+  name: string
+}
+
+/** One model an adapter advertises (mirror of `LlmModelInfo`). */
+export interface UsageLlmModelInfo {
+  provider: string
+  id: string
+  name: string
+}
+
+/**
+ * The `llm` service, narrowed to the two reads the alias/price editor needs.
+ *
+ * Optional on purpose: the editor must keep working (from recorded usage
+ * alone) when the service is absent, so the host half reaches it through
+ * `ctx.get('llm')` rather than declaring it a hard dependency.
+ */
+export interface UsageLlmService {
+  listProviders(): UsageLlmProviderInfo[]
+  listModels(provider: string): Promise<UsageLlmModelInfo[]>
+}
+
+declare module 'cordis' {
+  interface Context {
+    effect(dispose: () => void | (() => void), label?: string): void
+    sessionPersistence: UsageSessionPersistence
+    sessions: UsageSessionStore
+    storageDomain: UsageStorageDomain
+    webServer: UsageWebServer
+    slots: UsageSlotsService
+    locale: UsageLocaleService
+    layout: UsageLayoutService
+    /** Optional: the LLM adapter registry (absent on a host without llm). */
+    llm?: UsageLlmService
+  }
+}
+
+/** The augmented cordis Context (host + client halves). */
+export type { Context }
